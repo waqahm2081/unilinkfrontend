@@ -1,15 +1,24 @@
 import React, { useState, useEffect } from 'react'
 import '../styles/leads.css'
+import CountryMultiSelect from '../components/CountryMultiSelect'
+import { REFERRED_BY_OPTIONS } from '../constants/referredByOptions'
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
-const QUALIFICATION_LEVELS = [
-    'O Level', 'A Level', 'Matric', 'FSc', 'Intermediate', 'Bachelors', 'Masters', 'Other'
+const QUALIFICATION_OPTIONS = [
+    'O Level', 'A Level', 'Matriculation', 'Intermediate', 'Graduate', 'Post Graduate'
 ];
 
-const REFERRED_BY_OPTIONS = [
-    'Social Media', 'Friend or Family', 'Website', 'Walk-in',
-    'Education Fair', 'School / College', 'Advertisement', 'Other'
+const SUBJECT_GRADE_LEVELS = ['O Level', 'A Level'];
+const PERCENTAGE_LEVELS = ['Matriculation', 'Intermediate'];
+const CGPA_LEVELS = ['Graduate', 'Post Graduate'];
+
+const PURPOSE_OF_VISIT_OPTIONS = [
+    'Initial Consultation',
+    'Follow up meeting with the Counsellor',
+    'Counselling Meeting (For Registered Students)',
+    'Internship',
+    'Other'
 ];
 
 const ADMISSION_TEST_LABELS = {
@@ -26,7 +35,21 @@ const DEFAULT_ADMISSION_TESTS = {
     gre_gmat: { attempted: '', score: '', date: '' }
 };
 
-const DEFAULT_QUALIFICATION_ROW = { qualification: '', subject: '', grade: '' };
+const emptySubjectRow = () => ({ subject: '', grade: '' });
+
+const emptyQualificationDetails = () => ({
+    'O Level': { subjects: [emptySubjectRow()] },
+    'A Level': { subjects: [emptySubjectRow()] },
+    'Matriculation': { percentage: '' },
+    'Intermediate': { percentage: '' },
+    'Graduate': { cgpaDivision: '' },
+    'Post Graduate': { cgpaDivision: '' }
+});
+
+const emptyQualificationsState = () => ({
+    selected: [],
+    details: emptyQualificationDetails()
+});
 
 const emptyFormData = () => ({
     fullName: '',
@@ -35,25 +58,122 @@ const emptyFormData = () => ({
     address: '',
     interest: '',
     program: '',
+    instituteName: '',
     countriesOfInterest: [],
     countriesOther: '',
-    qualifications: [{ ...DEFAULT_QUALIFICATION_ROW }],
+    qualifications: emptyQualificationsState(),
     referredBy: '',
     counsellorNotes: '',
     admissionTests: JSON.parse(JSON.stringify(DEFAULT_ADMISSION_TESTS))
 });
 
+const normalizeLevelName = (name) => {
+    if (!name) return '';
+    const map = {
+        'O levels': 'O Level', 'O Levels': 'O Level', 'O Level': 'O Level',
+        'A levels': 'A Level', 'A Levels': 'A Level', 'A Level': 'A Level',
+        'Matric': 'Matriculation', 'Matriculation': 'Matriculation',
+        'FSc': 'Intermediate', 'Intermediate': 'Intermediate',
+        'Bachelors': 'Graduate', 'Bachelor': 'Graduate', 'Graduate': 'Graduate',
+        'Masters': 'Post Graduate', 'Master': 'Post Graduate', 'Post Graduate': 'Post Graduate', 'Postgraduate': 'Post Graduate'
+    };
+    return map[name] || (QUALIFICATION_OPTIONS.includes(name) ? name : '');
+};
+
 const parseQualificationsFromLead = (lead) => {
+    const state = emptyQualificationsState();
+    let parsed = null;
+
     if (lead.qualifications) {
         try {
-            const parsed = typeof lead.qualifications === 'string' ? JSON.parse(lead.qualifications) : lead.qualifications;
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            parsed = typeof lead.qualifications === 'string' ? JSON.parse(lead.qualifications) : lead.qualifications;
         } catch (e) { /* fall through */ }
     }
-    if (lead.qualification || lead.grades) {
-        return [{ qualification: lead.qualification || '', subject: '', grade: lead.grades || '' }];
+
+    if (Array.isArray(parsed) && parsed.length > 0) {
+        // New format: [{ level, subjects|percentage|cgpaDivision }]
+        if (parsed[0].level || parsed.some(q => q.subjects || q.percentage != null || q.cgpaDivision != null)) {
+            parsed.forEach(entry => {
+                const level = normalizeLevelName(entry.level || entry.qualification);
+                if (!level || !QUALIFICATION_OPTIONS.includes(level)) return;
+                if (!state.selected.includes(level)) state.selected.push(level);
+
+                if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                    const subjects = Array.isArray(entry.subjects) && entry.subjects.length > 0
+                        ? entry.subjects.map(s => ({ subject: s.subject || '', grade: s.grade || '' }))
+                        : (entry.subject || entry.grade
+                            ? [{ subject: entry.subject || '', grade: entry.grade || '' }]
+                            : [emptySubjectRow()]);
+                    state.details[level] = { subjects };
+                } else if (PERCENTAGE_LEVELS.includes(level)) {
+                    state.details[level] = { percentage: entry.percentage || entry.grade || '' };
+                } else if (CGPA_LEVELS.includes(level)) {
+                    state.details[level] = { cgpaDivision: entry.cgpaDivision || entry.grade || '' };
+                }
+            });
+            return state;
+        }
+
+        // Old flat format: [{ qualification, subject, grade }]
+        const byLevel = {};
+        parsed.forEach(row => {
+            const level = normalizeLevelName(row.qualification);
+            if (!level) return;
+            if (!state.selected.includes(level)) state.selected.push(level);
+            if (!byLevel[level]) byLevel[level] = [];
+            if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                byLevel[level].push({ subject: row.subject || '', grade: row.grade || '' });
+            } else if (PERCENTAGE_LEVELS.includes(level)) {
+                state.details[level] = { percentage: row.grade || row.subject || '' };
+            } else if (CGPA_LEVELS.includes(level)) {
+                state.details[level] = { cgpaDivision: row.grade || row.subject || '' };
+            }
+        });
+        Object.keys(byLevel).forEach(level => {
+            state.details[level] = {
+                subjects: byLevel[level].length > 0 ? byLevel[level] : [emptySubjectRow()]
+            };
+        });
+        return state;
     }
-    return [{ ...DEFAULT_QUALIFICATION_ROW }];
+
+    if (lead.qualification || lead.grades) {
+        const level = normalizeLevelName(lead.qualification);
+        if (level) {
+            state.selected = [level];
+            if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                state.details[level] = { subjects: [{ subject: '', grade: lead.grades || '' }] };
+            } else if (PERCENTAGE_LEVELS.includes(level)) {
+                state.details[level] = { percentage: lead.grades || '' };
+            } else if (CGPA_LEVELS.includes(level)) {
+                state.details[level] = { cgpaDivision: lead.grades || '' };
+            }
+        }
+    }
+    return state;
+};
+
+const buildQualificationsForApi = (qualifications) => {
+    if (!qualifications?.selected?.length) return [];
+    return qualifications.selected.map(level => {
+        const detail = qualifications.details?.[level] || {};
+        if (SUBJECT_GRADE_LEVELS.includes(level)) {
+            return {
+                level,
+                subjects: (detail.subjects || []).map(s => ({
+                    subject: (s.subject || '').trim(),
+                    grade: (s.grade || '').trim()
+                }))
+            };
+        }
+        if (PERCENTAGE_LEVELS.includes(level)) {
+            return { level, percentage: (detail.percentage || '').trim() };
+        }
+        if (CGPA_LEVELS.includes(level)) {
+            return { level, cgpaDivision: (detail.cgpaDivision || '').trim() };
+        }
+        return { level };
+    });
 };
 
 const parseAdmissionTestsFromLead = (lead) => {
@@ -77,15 +197,22 @@ const parseAdmissionTestsFromLead = (lead) => {
     }
 };
 
-const mapLeadToFormData = (lead) => {
-    let countriesOfInterest = [];
-    if (lead.countries_of_interest) {
-        try {
-            countriesOfInterest = JSON.parse(lead.countries_of_interest);
-        } catch (e) {
-            countriesOfInterest = [];
-        }
+const parseCountriesOfInterest = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+        return value.map(c => String(c).trim()).filter(Boolean);
     }
+    try {
+        const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+        if (Array.isArray(parsed)) return parsed.map(c => String(c).trim()).filter(Boolean);
+        return [String(value).trim()].filter(Boolean);
+    } catch {
+        return String(value).split(',').map(c => c.trim()).filter(Boolean);
+    }
+};
+
+const mapLeadToFormData = (lead) => {
+    const countriesOfInterest = parseCountriesOfInterest(lead.countries_of_interest);
     return {
         fullName: lead.full_name,
         email: lead.email,
@@ -93,6 +220,7 @@ const mapLeadToFormData = (lead) => {
         address: lead.address,
         interest: lead.interest || '',
         program: lead.program || '',
+        instituteName: lead.institute_name || '',
         countriesOfInterest,
         countriesOther: lead.countries_other || '',
         qualifications: parseQualificationsFromLead(lead),
@@ -131,7 +259,8 @@ export default function LeadForm() {
         lookupName: '',
         lookupEmail: '',
         lookupPhone: '',
-        purposeOfVisit: ''
+        purposeOfVisit: '',
+        purposeOfVisitOther: ''
     });
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [successMessage, setSuccessMessage] = useState('');
@@ -213,7 +342,8 @@ export default function LeadForm() {
             lookupName: '',
             lookupEmail: '',
             lookupPhone: '',
-            purposeOfVisit: ''
+            purposeOfVisit: '',
+            purposeOfVisitOther: ''
         });
         setIsFollowUp(false);
         setIsGeneralVisit(false);
@@ -333,10 +463,19 @@ export default function LeadForm() {
 
         if (!lookupData.purposeOfVisit.trim()) {
             errors.purposeOfVisit = 'Purpose of visit is required';
+        } else if (lookupData.purposeOfVisit === 'Other' && !lookupData.purposeOfVisitOther.trim()) {
+            errors.purposeOfVisit = 'Please specify the purpose of visit';
         }
 
         setFieldErrors(errors);
         return Object.keys(errors).length === 0;
+    };
+
+    const resolvePurposeOfVisit = () => {
+        if (lookupData.purposeOfVisit === 'Other') {
+            return `Other: ${lookupData.purposeOfVisitOther.trim()}`;
+        }
+        return lookupData.purposeOfVisit;
     };
 
     const handleLookupSubmit = async (e) => {
@@ -354,7 +493,12 @@ export default function LeadForm() {
             const response = await fetch(`${API_URL}/leads/lookup`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(lookupData)
+                body: JSON.stringify({
+                    lookupName: lookupData.lookupName,
+                    lookupEmail: lookupData.lookupEmail,
+                    lookupPhone: lookupData.lookupPhone,
+                    purposeOfVisit: resolvePurposeOfVisit()
+                })
             });
             
             const data = await response.json();
@@ -388,18 +532,22 @@ export default function LeadForm() {
         
         try {
             let response;
+            const payload = {
+                ...formData,
+                qualifications: buildQualificationsForApi(formData.qualifications)
+            };
             
             if (isFollowUp && currentLeadId) {
                 response = await fetch(`${API_URL}/leads/${currentLeadId}/follow-up`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...formData, purposeOfVisit: lookupData.purposeOfVisit })
+                    body: JSON.stringify({ ...payload, purposeOfVisit: resolvePurposeOfVisit() })
                 });
             } else {
                 response = await fetch(`${API_URL}/leads`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData)
+                    body: JSON.stringify(payload)
                 });
             }
             
@@ -485,28 +633,97 @@ export default function LeadForm() {
         });
     };
 
-    const handleQualificationChange = (index, field, value) => {
+    const handleQualificationToggle = (level) => {
         setFormData(prev => {
-            const qualifications = [...prev.qualifications];
-            qualifications[index] = { ...qualifications[index], [field]: value };
-            return { ...prev, qualifications };
+            const selected = prev.qualifications.selected || [];
+            const isSelected = selected.includes(level);
+            const nextSelected = isSelected
+                ? selected.filter(l => l !== level)
+                : [...selected, level];
+
+            const details = { ...prev.qualifications.details };
+            if (!isSelected) {
+                if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                    details[level] = { subjects: [emptySubjectRow()] };
+                } else if (PERCENTAGE_LEVELS.includes(level)) {
+                    details[level] = { percentage: '' };
+                } else if (CGPA_LEVELS.includes(level)) {
+                    details[level] = { cgpaDivision: '' };
+                }
+            }
+
+            return {
+                ...prev,
+                qualifications: { selected: nextSelected, details }
+            };
         });
     };
 
-    const addQualificationRow = () => {
+    const handleQualificationDetailChange = (level, field, value) => {
         setFormData(prev => ({
             ...prev,
-            qualifications: [...prev.qualifications, { ...DEFAULT_QUALIFICATION_ROW }]
+            qualifications: {
+                ...prev.qualifications,
+                details: {
+                    ...prev.qualifications.details,
+                    [level]: {
+                        ...prev.qualifications.details[level],
+                        [field]: value
+                    }
+                }
+            }
         }));
     };
 
-    const removeQualificationRow = (index) => {
+    const handleSubjectRowChange = (level, index, field, value) => {
+        setFormData(prev => {
+            const subjects = [...(prev.qualifications.details[level]?.subjects || [])];
+            subjects[index] = { ...subjects[index], [field]: value };
+            return {
+                ...prev,
+                qualifications: {
+                    ...prev.qualifications,
+                    details: {
+                        ...prev.qualifications.details,
+                        [level]: { subjects }
+                    }
+                }
+            };
+        });
+    };
+
+    const addSubjectRow = (level) => {
         setFormData(prev => ({
             ...prev,
-            qualifications: prev.qualifications.length > 1
-                ? prev.qualifications.filter((_, i) => i !== index)
-                : [{ ...DEFAULT_QUALIFICATION_ROW }]
+            qualifications: {
+                ...prev.qualifications,
+                details: {
+                    ...prev.qualifications.details,
+                    [level]: {
+                        subjects: [...(prev.qualifications.details[level]?.subjects || []), emptySubjectRow()]
+                    }
+                }
+            }
         }));
+    };
+
+    const removeSubjectRow = (level, index) => {
+        setFormData(prev => {
+            const subjects = prev.qualifications.details[level]?.subjects || [];
+            const next = subjects.length > 1
+                ? subjects.filter((_, i) => i !== index)
+                : [emptySubjectRow()];
+            return {
+                ...prev,
+                qualifications: {
+                    ...prev.qualifications,
+                    details: {
+                        ...prev.qualifications.details,
+                        [level]: { subjects: next }
+                    }
+                }
+            };
+        });
     };
 
     const handleAdmissionTestChange = (testKey, field, value) => {
@@ -529,9 +746,18 @@ export default function LeadForm() {
 
     const handleLookupChange = (e) => {
         const { name, value } = e.target;
-        setLookupData(prev => ({ ...prev, [name]: value }));
-        if (fieldErrors[name] || fieldErrors.lookupContact) {
-            setFieldErrors(prev => ({ ...prev, [name]: '', lookupContact: '' }));
+        setLookupData(prev => ({
+            ...prev,
+            [name]: value,
+            ...(name === 'purposeOfVisit' && value !== 'Other' ? { purposeOfVisitOther: '' } : {})
+        }));
+        if (fieldErrors[name] || fieldErrors.purposeOfVisit || fieldErrors.lookupContact) {
+            setFieldErrors(prev => ({
+                ...prev,
+                [name]: '',
+                purposeOfVisit: name === 'purposeOfVisit' || name === 'purposeOfVisitOther' ? '' : prev.purposeOfVisit,
+                lookupContact: ''
+            }));
         }
     };
 
@@ -708,15 +934,44 @@ export default function LeadForm() {
 
                                     {/* Purpose of Visit */}
                                     <div className="form-group full-width">
-                                        <label htmlFor="purposeOfVisit">Purpose of Visit *</label>
-                                        <textarea
-                                            id="purposeOfVisit" name="purposeOfVisit" rows="3"
-                                            placeholder="Briefly describe your reason for visiting today..."
-                                            value={lookupData.purposeOfVisit}
-                                            onChange={handleLookupChange}
-                                            disabled={loading}
-                                            style={fieldErrors.purposeOfVisit ? {borderColor: '#ef4444'} : {}}
-                                        />
+                                        <label>Purpose for your visit *</label>
+                                        <div
+                                            className="purpose-radio-list"
+                                            style={fieldErrors.purposeOfVisit ? { borderColor: '#ef4444' } : undefined}
+                                        >
+                                            {PURPOSE_OF_VISIT_OPTIONS.map(option => (
+                                                <label
+                                                    key={option}
+                                                    className={`purpose-radio-item${lookupData.purposeOfVisit === option ? ' selected' : ''}${option === 'Other' ? ' purpose-other' : ''}`}
+                                                >
+                                                    <input
+                                                        type="radio"
+                                                        name="purposeOfVisit"
+                                                        value={option}
+                                                        checked={lookupData.purposeOfVisit === option}
+                                                        onChange={handleLookupChange}
+                                                        disabled={loading}
+                                                    />
+                                                    <span>{option === 'Other' ? 'Other:' : option}</span>
+                                                    {option === 'Other' && (
+                                                        <input
+                                                            type="text"
+                                                            name="purposeOfVisitOther"
+                                                            className="purpose-other-input"
+                                                            placeholder="Please specify"
+                                                            value={lookupData.purposeOfVisitOther}
+                                                            onChange={handleLookupChange}
+                                                            disabled={loading || lookupData.purposeOfVisit !== 'Other'}
+                                                            onClick={() => {
+                                                                if (lookupData.purposeOfVisit !== 'Other') {
+                                                                    setLookupData(prev => ({ ...prev, purposeOfVisit: 'Other' }));
+                                                                }
+                                                            }}
+                                                        />
+                                                    )}
+                                                </label>
+                                            ))}
+                                        </div>
                                         {fieldErrors.purposeOfVisit && <span style={{color: '#ef4444', fontSize: '0.875rem', marginTop: '4px'}}>{fieldErrors.purposeOfVisit}</span>}
                                     </div>
 
@@ -750,10 +1005,10 @@ export default function LeadForm() {
                                 {isFollowUp ? 'Follow-Up Registration' : 'New Student Registration'}
                             </h2>
                             <p className="section-subtitle">
-                                {isFollowUp ? 'Your previous information has been retrieved' : 'Please provide your details for first-time inquiry'}
+                                {isFollowUp ? 'Please review your information below and submit your follow-up' : 'Please provide your details for first-time inquiry'}
                             </p>
 
-                            <form onSubmit={handleRegistrationSubmit} className="registration-form">
+                            <form onSubmit={handleRegistrationSubmit} className={`registration-form${isFollowUp ? ' follow-up-readonly' : ''}`}>
                                 <div className="form-grid">
 
                                     {/* Full Name */}
@@ -764,7 +1019,8 @@ export default function LeadForm() {
                                             placeholder="Enter your full name"
                                             value={formData.fullName}
                                             onChange={handleInputChange}
-                                            required disabled={loading}
+                                            required disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
                                             style={fieldErrors.fullName ? {borderColor: '#ef4444'} : {}}
                                         />
                                         {fieldErrors.fullName && <span style={{color: '#ef4444', fontSize: '0.875rem', marginTop: '4px'}}>{fieldErrors.fullName}</span>}
@@ -778,7 +1034,8 @@ export default function LeadForm() {
                                             placeholder="your.email@example.com"
                                             value={formData.email}
                                             onChange={handleInputChange}
-                                            required disabled={loading}
+                                            required disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
                                             style={fieldErrors.email ? {borderColor: '#ef4444'} : {}}
                                         />
                                         {fieldErrors.email && <span style={{color: '#ef4444', fontSize: '0.875rem', marginTop: '4px'}}>{fieldErrors.email}</span>}
@@ -792,7 +1049,8 @@ export default function LeadForm() {
                                             placeholder="+92 300 1234567"
                                             value={formData.phone}
                                             onChange={handleInputChange}
-                                            required disabled={loading}
+                                            required disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
                                             style={fieldErrors.phone ? {borderColor: '#ef4444'} : {}}
                                         />
                                         {fieldErrors.phone && <span style={{color: '#ef4444', fontSize: '0.875rem', marginTop: '4px'}}>{fieldErrors.phone}</span>}
@@ -806,7 +1064,8 @@ export default function LeadForm() {
                                             placeholder="Enter your complete address"
                                             value={formData.address}
                                             onChange={handleInputChange}
-                                            required disabled={loading}
+                                            required disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
                                             style={fieldErrors.address ? {borderColor: '#ef4444'} : {}}
                                         />
                                         {fieldErrors.address && <span style={{color: '#ef4444', fontSize: '0.875rem', marginTop: '4px'}}>{fieldErrors.address}</span>}
@@ -820,7 +1079,8 @@ export default function LeadForm() {
                                             placeholder="e.g. Business, Engineering, Medicine..."
                                             value={formData.interest}
                                             onChange={handleInputChange}
-                                            required disabled={loading}
+                                            required disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
                                             style={fieldErrors.interest ? {borderColor: '#ef4444'} : {}}
                                         />
                                         {fieldErrors.interest && <span style={{color: '#ef4444', fontSize: '0.875rem', marginTop: '4px'}}>{fieldErrors.interest}</span>}
@@ -833,7 +1093,7 @@ export default function LeadForm() {
                                             id="program" name="program"
                                             value={formData.program}
                                             onChange={handleInputChange}
-                                            disabled={loading}
+                                            disabled={loading || isFollowUp}
                                         >
                                             <option value="">Select a program</option>
                                             <option value="undergraduate">Undergraduate Programs</option>
@@ -845,107 +1105,144 @@ export default function LeadForm() {
                                         </select>
                                     </div>
 
+                                    {/* School / College / Institute */}
+                                    <div className="form-group full-width">
+                                        <label htmlFor="instituteName">School/College/Institute Name</label>
+                                        <input
+                                            type="text"
+                                            id="instituteName"
+                                            name="instituteName"
+                                            placeholder="Enter school, college, or institute name"
+                                            value={formData.instituteName}
+                                            onChange={handleInputChange}
+                                            disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
+                                        />
+                                    </div>
+
                                     {/* Countries of Interest — loaded from /countries (Active only) */}
                                     <div className="form-group full-width">
                                         <label className="section-label-orange">
-                                            Countries of Interest (Multiple Selection)
+                                            Countries of Interest
                                         </label>
-                                        <div className="countries-checkbox-grid">
-                                            {countries.length === 0 ? (
-                                                <p className="countries-loading">Loading countries...</p>
-                                            ) : (
-                                                countries.map((country) => {
-                                                    const countryName = country.country_name;
-                                                    const isSelected = formData.countriesOfInterest.includes(countryName);
-                                                    return (
-                                                        <label
-                                                            key={country.id}
-                                                            className={`country-checkbox-item${isSelected ? ' selected' : ''}`}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={isSelected}
-                                                                onChange={() => handleCountryToggle(countryName)}
-                                                                disabled={loading}
-                                                            />
-                                                            <span>{countryName}</span>
-                                                        </label>
-                                                    );
-                                                })
-                                            )}
-                                            <label className={`country-checkbox-item other-country${formData.countriesOfInterest.includes('Other') ? ' selected' : ''}`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.countriesOfInterest.includes('Other')}
-                                                    onChange={() => handleCountryToggle('Other')}
-                                                    disabled={loading}
-                                                />
-                                                <span>Other</span>
-                                                <input
-                                                    type="text"
-                                                    className="other-country-input"
-                                                    placeholder="Please specify"
-                                                    value={formData.countriesOther}
-                                                    onChange={(e) => setFormData(prev => ({ ...prev, countriesOther: e.target.value }))}
-                                                    disabled={loading || !formData.countriesOfInterest.includes('Other')}
-                                                />
-                                            </label>
-                                        </div>
+                                        <CountryMultiSelect
+                                            countries={countries}
+                                            selected={formData.countriesOfInterest}
+                                            onToggle={handleCountryToggle}
+                                            otherValue={formData.countriesOther}
+                                            onOtherChange={(value) => setFormData(prev => ({ ...prev, countriesOther: value }))}
+                                            disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
+                                        />
                                     </div>
 
                                     {/* Qualification Section */}
                                     <div className="form-group full-width">
                                         <label className="section-label-orange">Qualification</label>
-                                        <div className="qualification-table">
-                                            <div className="qualification-header">
-                                                <span>Qualification</span>
-                                                <span>Subject</span>
-                                                <span>Grade</span>
-                                                <span></span>
-                                            </div>
-                                            {formData.qualifications.map((row, index) => (
-                                                <div key={index} className="qualification-row">
-                                                    <select
-                                                        value={row.qualification}
-                                                        onChange={(e) => handleQualificationChange(index, 'qualification', e.target.value)}
-                                                        disabled={loading}
+                                        <p className="qualification-prompt">{isFollowUp ? 'Your qualifications on file:' : 'Which qualification have you done?'}</p>
+                                        <div className="countries-checkbox-grid qualification-levels-grid">
+                                            {QUALIFICATION_OPTIONS.map(level => {
+                                                const isSelected = (formData.qualifications.selected || []).includes(level);
+                                                return (
+                                                    <label
+                                                        key={level}
+                                                        className={`country-checkbox-item${isSelected ? ' selected' : ''}${isFollowUp ? ' read-only' : ''}`}
                                                     >
-                                                        <option value="">Select</option>
-                                                        {QUALIFICATION_LEVELS.map(level => (
-                                                            <option key={level} value={level}>{level}</option>
-                                                        ))}
-                                                    </select>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="e.g. Mathematics"
-                                                        value={row.subject}
-                                                        onChange={(e) => handleQualificationChange(index, 'subject', e.target.value)}
-                                                        disabled={loading}
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        placeholder="e.g. A*"
-                                                        value={row.grade}
-                                                        onChange={(e) => handleQualificationChange(index, 'grade', e.target.value)}
-                                                        disabled={loading}
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        className="qualification-remove-btn"
-                                                        onClick={() => removeQualificationRow(index)}
-                                                        disabled={loading}
-                                                        title="Remove row"
-                                                    >
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                                                            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                                        </svg>
-                                                    </button>
-                                                </div>
-                                            ))}
-                                            <button type="button" className="add-subject-btn" onClick={addQualificationRow} disabled={loading}>
-                                                + Add Subject
-                                            </button>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() => handleQualificationToggle(level)}
+                                                            disabled={loading || isFollowUp}
+                                                        />
+                                                        <span>{level}</span>
+                                                    </label>
+                                                );
+                                            })}
                                         </div>
+
+                                        {(formData.qualifications.selected || []).map(level => (
+                                            <div key={level} className="qualification-detail-box">
+                                                <h4 className="qualification-detail-title">{level}</h4>
+
+                                                {SUBJECT_GRADE_LEVELS.includes(level) && (
+                                                    <div className="qualification-table">
+                                                        <div className="qualification-header qualification-header-subjects">
+                                                            <span>Subject</span>
+                                                            <span>Grade</span>
+                                                            <span></span>
+                                                        </div>
+                                                        {(formData.qualifications.details[level]?.subjects || []).map((row, index) => (
+                                                            <div key={index} className="qualification-row qualification-row-subjects">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="e.g. Mathematics"
+                                                                    value={row.subject}
+                                                                    onChange={(e) => handleSubjectRowChange(level, index, 'subject', e.target.value)}
+                                                                    disabled={loading || isFollowUp}
+                                                                    readOnly={isFollowUp}
+                                                                />
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="e.g. A*"
+                                                                    value={row.grade}
+                                                                    onChange={(e) => handleSubjectRowChange(level, index, 'grade', e.target.value)}
+                                                                    disabled={loading || isFollowUp}
+                                                                    readOnly={isFollowUp}
+                                                                />
+                                                                {!isFollowUp && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="qualification-remove-btn"
+                                                                    onClick={() => removeSubjectRow(level, index)}
+                                                                    disabled={loading}
+                                                                    title="Remove row"
+                                                                >
+                                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                                                        <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                                    </svg>
+                                                                </button>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                        {!isFollowUp && (
+                                                        <button type="button" className="add-subject-btn" onClick={() => addSubjectRow(level)} disabled={loading}>
+                                                            + Add Subject
+                                                        </button>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {PERCENTAGE_LEVELS.includes(level) && (
+                                                    <div className="qualification-simple-field">
+                                                        <label>Percentage</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-control"
+                                                            placeholder="e.g. 85%"
+                                                            value={formData.qualifications.details[level]?.percentage || ''}
+                                                            onChange={(e) => handleQualificationDetailChange(level, 'percentage', e.target.value)}
+                                                            disabled={loading || isFollowUp}
+                                                            readOnly={isFollowUp}
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {CGPA_LEVELS.includes(level) && (
+                                                    <div className="qualification-simple-field">
+                                                        <label>CGPA / Division</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-control"
+                                                            placeholder="e.g. 3.5 / First Division"
+                                                            value={formData.qualifications.details[level]?.cgpaDivision || ''}
+                                                            onChange={(e) => handleQualificationDetailChange(level, 'cgpaDivision', e.target.value)}
+                                                            disabled={loading || isFollowUp}
+                                                            readOnly={isFollowUp}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
 
                                     {/* Referred By */}
@@ -956,7 +1253,7 @@ export default function LeadForm() {
                                             name="referredBy"
                                             value={formData.referredBy}
                                             onChange={handleInputChange}
-                                            disabled={loading}
+                                            disabled={loading || isFollowUp}
                                         >
                                             <option value="">How did you hear about us?</option>
                                             {REFERRED_BY_OPTIONS.map(option => (
@@ -981,7 +1278,7 @@ export default function LeadForm() {
                                                     <select
                                                         value={formData.admissionTests[key].attempted}
                                                         onChange={(e) => handleAdmissionTestChange(key, 'attempted', e.target.value)}
-                                                        disabled={loading}
+                                                        disabled={loading || isFollowUp}
                                                     >
                                                         <option value="">Select</option>
                                                         <option value="Yes">Yes</option>
@@ -993,13 +1290,15 @@ export default function LeadForm() {
                                                         placeholder={key === 'ielts' ? 'e.g. 6.5' : key === 'toefl' ? 'e.g. 90' : key === 'sat' ? 'e.g. 1200' : 'e.g. 310'}
                                                         value={formData.admissionTests[key].score}
                                                         onChange={(e) => handleAdmissionTestChange(key, 'score', e.target.value)}
-                                                        disabled={loading || formData.admissionTests[key].attempted !== 'Yes'}
+                                                        disabled={loading || isFollowUp || formData.admissionTests[key].attempted !== 'Yes'}
+                                                        readOnly={isFollowUp}
                                                     />
                                                     <input
                                                         type="date"
                                                         value={formData.admissionTests[key].date}
                                                         onChange={(e) => handleAdmissionTestChange(key, 'date', e.target.value)}
-                                                        disabled={loading || formData.admissionTests[key].attempted !== 'Yes'}
+                                                        disabled={loading || isFollowUp || formData.admissionTests[key].attempted !== 'Yes'}
+                                                        readOnly={isFollowUp}
                                                     />
                                                 </div>
                                             ))}
@@ -1016,13 +1315,14 @@ export default function LeadForm() {
                                             placeholder="Write your notes here..."
                                             value={formData.counsellorNotes}
                                             onChange={handleInputChange}
-                                            disabled={loading}
+                                            disabled={loading || isFollowUp}
+                                            readOnly={isFollowUp}
                                         />
                                     </div>
                                 </div>
 
                                 <button type="submit" className="submit-button" disabled={loading}>
-                                    <span>{loading ? 'Submitting...' : 'Submit Registration'}</span>
+                                    <span>{loading ? 'Submitting...' : (isFollowUp ? 'Submit Follow-Up' : 'Submit Registration')}</span>
                                     {!loading && (
                                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                                             <path d="M4 10 L16 10 M12 6 L16 10 L12 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>

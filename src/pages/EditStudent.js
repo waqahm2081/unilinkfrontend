@@ -4,6 +4,8 @@ import '../styles/students.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
 import MeetingScheduler from '../components/MeetingScheduler'
+import { ViewModeWrap } from '../components/ViewRecordModal'
+import { REFERRED_BY_OPTIONS, normalizeSourceInquiry } from '../constants/referredByOptions'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -12,10 +14,28 @@ import {
   faHistory, faSearch, faFileAlt, faDownload, faFileUpload,
   faImage, faGraduationCap, faExclamationTriangle, faCloudUploadAlt,
   faGlobe, faPencilAlt, faUniversity, faExternalLinkAlt, faChevronDown,
-  faChevronUp
+  faChevronUp, faCamera, faUser
 } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
+
+const parseLeadCountriesValue = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(c => String(c).trim()).filter(Boolean);
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(c => String(c).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+
+const resolveLeadCountryNames = (countriesOfInterest, countriesOther) => {
+  const other = (countriesOther || '').trim();
+  return parseLeadCountriesValue(countriesOfInterest)
+    .map(c => (c.toLowerCase() === 'other' ? (other || null) : c))
+    .filter(Boolean);
+};
 
 const PREDEFINED_DOCS = [
   { name: 'Passport',                 type: 'Passport',           order: 1 },
@@ -26,6 +46,35 @@ const PREDEFINED_DOCS = [
   { name: 'Essay or SOP',             type: 'SOP',                order: 6 },
   { name: 'Birth Certificate',         type: 'Birth Certificate',  order: 7 },
 ];
+
+const parsePassportNumbers = (value) => {
+  if (!value) return [''];
+  if (Array.isArray(value)) {
+    const list = value.map(v => String(v || '').trim()).filter(Boolean);
+    return list.length ? list : [''];
+  }
+  const str = String(value).trim();
+  if (!str) return [''];
+  try {
+    const parsed = JSON.parse(str);
+    if (Array.isArray(parsed)) {
+      const list = parsed.map(v => String(v || '').trim()).filter(Boolean);
+      return list.length ? list : [''];
+    }
+  } catch { /* plain string */ }
+  if (str.includes(',')) {
+    const list = str.split(',').map(s => s.trim()).filter(Boolean);
+    return list.length ? list : [''];
+  }
+  return [str];
+};
+
+const serializePassportNumbers = (list) => {
+  const cleaned = (list || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!cleaned.length) return '';
+  if (cleaned.length === 1) return cleaned[0];
+  return JSON.stringify(cleaned);
+};
 
 const MARITAL_STATUS_OPTIONS = ['Single', 'Married', 'Divorced', 'Widowed'];
 
@@ -60,8 +109,9 @@ const emptyWork = () => ({
   employment_type: '', relation: ''
 });
 
-export default function EditStudent() {
-  const { id } = useParams();
+export default function EditStudent({ recordId, viewOnly = false } = {}) {
+  const { id: paramId } = useParams();
+  const id = recordId || paramId;
   const navigate = useNavigate();
 
   const [loading, setLoading]   = useState(true);
@@ -106,14 +156,18 @@ export default function EditStudent() {
     emptyFamilyMember('Sponsor'),
   ]);
 
-  // Sponsor relation type selection: 'Father' | 'Mother' | 'Guardian'
+  // Sponsor / Emergency relation type: 'Father' | 'Mother' | 'Guardian'
   const [sponsorRelationType, setSponsorRelationType] = useState('Guardian');
+  const [emergencyRelationType, setEmergencyRelationType] = useState('Guardian');
 
   const [educationEntries, setEducationEntries]   = useState([]);
   const [activities, setActivities]               = useState([]);
   const [awards, setAwards]                       = useState([]);
   const [workExperiences, setWorkExperiences]     = useState([]);
+  const [passportNumbers, setPassportNumbers]     = useState(['']);
   const [documents, setDocuments]                 = useState([]);
+  const [profilePictureFile, setProfilePictureFile] = useState(null);
+  const [profilePicturePreview, setProfilePicturePreview] = useState('');
   const [assignedCounselors, setAssignedCounselors] = useState([]);
   const [meetings, setMeetings]                   = useState([]);
   const [studentApplications, setStudentApplications] = useState([]);
@@ -145,6 +199,7 @@ export default function EditStudent() {
   const [uploadingDocSlot, setUploadingDocSlot]     = useState(null);
   const [customDocName, setCustomDocName]           = useState('');
   const [docFile, setDocFile]                       = useState(null);
+  const [docFiles, setDocFiles]                     = useState([]); // multi-file for Passport
 
   // ---- Effects ----
   useEffect(() => {
@@ -180,45 +235,85 @@ export default function EditStudent() {
     }
   }, [showApplicationModal, assignedCountryIds]);
 
-  // When sponsor relation type changes to Father or Mother, auto-fill from those family members
+  // Auto-fill sponsor / emergency from Father, Mother, or Sponsor when selected
+  const fatherMember = familyDetails.find(f => f.type === 'Father') || emptyFamilyMember('Father');
+  const motherMember = familyDetails.find(f => f.type === 'Mother') || emptyFamilyMember('Mother');
+  const sponsorMember = familyDetails.find(f => f.type === 'Sponsor') || emptyFamilyMember('Sponsor');
+  const sponsorLocked = sponsorRelationType !== 'Guardian';
+  const emergencyLocked = true; // always autofilled from Father / Mother / Sponsor-Guardian
+
   useEffect(() => {
-    if (sponsorRelationType === 'Father') {
-      const father = familyDetails.find(f => f.type === 'Father');
-      if (father) {
-        setFamilyDetails(prev => prev.map(m =>
-          m.type === 'Sponsor'
-            ? {
-                ...m,
-                full_name: father.full_name || '',
-                relation: 'Father',
-                contact_no: father.contact_no || '',
-                email: father.email || '',
-                profession: father.profession || '',
-                address: father.address || '',
-              }
-            : m
-        ));
+    if (sponsorRelationType !== 'Father' && sponsorRelationType !== 'Mother') return;
+    const source = sponsorRelationType === 'Father' ? fatherMember : motherMember;
+    setFamilyDetails(prev => {
+      const current = prev.find(m => m.type === 'Sponsor');
+      const next = {
+        full_name: source.full_name || '',
+        relation: sponsorRelationType,
+        contact_no: source.contact_no || '',
+        email: source.email || '',
+        profession: source.profession || '',
+        address: source.address || '',
+      };
+      if (
+        current &&
+        current.full_name === next.full_name &&
+        current.relation === next.relation &&
+        current.contact_no === next.contact_no &&
+        current.email === next.email &&
+        current.profession === next.profession &&
+        current.address === next.address
+      ) {
+        return prev;
       }
-    } else if (sponsorRelationType === 'Mother') {
-      const mother = familyDetails.find(f => f.type === 'Mother');
-      if (mother) {
-        setFamilyDetails(prev => prev.map(m =>
-          m.type === 'Sponsor'
-            ? {
-                ...m,
-                full_name: mother.full_name || '',
-                relation: 'Mother',
-                contact_no: mother.contact_no || '',
-                email: mother.email || '',
-                profession: mother.profession || '',
-                address: mother.address || '',
-              }
-            : m
-        ));
-      }
+      return prev.map(m => (m.type === 'Sponsor' ? { ...m, ...next } : m));
+    });
+  }, [
+    sponsorRelationType,
+    fatherMember.full_name, fatherMember.contact_no, fatherMember.email, fatherMember.profession, fatherMember.address,
+    motherMember.full_name, motherMember.contact_no, motherMember.email, motherMember.profession, motherMember.address,
+  ]);
+
+  useEffect(() => {
+    let source;
+    let relationValue;
+    if (emergencyRelationType === 'Father') {
+      source = fatherMember;
+      relationValue = 'Father';
+    } else if (emergencyRelationType === 'Mother') {
+      source = motherMember;
+      relationValue = 'Mother';
+    } else {
+      source = sponsorMember;
+      relationValue = sponsorMember.relation || 'Guardian';
     }
-    // Guardian: leave fields as-is for manual entry
-  }, [sponsorRelationType]);
+
+    setEmergencyContact(prev => {
+      const next = {
+        ...prev,
+        full_name: source.full_name || '',
+        relation: relationValue,
+        contact_no: source.contact_no || '',
+        email: source.email || '',
+        address: source.address || '',
+      };
+      if (
+        prev.full_name === next.full_name &&
+        prev.relation === next.relation &&
+        prev.contact_no === next.contact_no &&
+        prev.email === next.email &&
+        prev.address === next.address
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [
+    emergencyRelationType,
+    fatherMember.full_name, fatherMember.contact_no, fatherMember.email, fatherMember.address,
+    motherMember.full_name, motherMember.contact_no, motherMember.email, motherMember.address,
+    sponsorMember.full_name, sponsorMember.contact_no, sponsorMember.email, sponsorMember.address, sponsorMember.relation,
+  ]);
 
   // ---- Fetchers ----
   const fetchExistingApplications = async () => {
@@ -296,14 +391,26 @@ export default function EditStudent() {
       const res  = await fetch(`${API_URL}/students/${id}`);
       const data = await res.json();
       if (data.success) {
-        setStudentData(data.student);
+        setStudentData({
+          ...data.student,
+          source_inquiry: normalizeSourceInquiry(data.student?.source_inquiry),
+        });
+        setPassportNumbers(parsePassportNumbers(data.student?.passport_no));
+        setProfilePictureFile(null);
+        setProfilePicturePreview(data.student?.profile_picture ? `${API_URL}${data.student.profile_picture}` : '');
         setEducationEntries(data.education || []);
         setWorkExperiences(data.workExperience || []);
         setDocuments(data.documents || []);
         setAssignedCounselors(data.assignedCounselors || []);
         setMeetings(data.meetings || []);
 
-        if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
+        if (data.emergencyContact) {
+          setEmergencyContact(data.emergencyContact);
+          const rel = (data.emergencyContact.relation || '').toLowerCase();
+          if (rel === 'father') setEmergencyRelationType('Father');
+          else if (rel === 'mother') setEmergencyRelationType('Mother');
+          else setEmergencyRelationType('Guardian');
+        }
         if (data.familyDetails && data.familyDetails.length > 0) {
           const father  = data.familyDetails.find(f => f.type === 'Father')  || emptyFamilyMember('Father');
           const mother  = data.familyDetails.find(f => f.type === 'Mother')  || emptyFamilyMember('Mother');
@@ -343,6 +450,31 @@ export default function EditStudent() {
     }
   }, [allCountries, studentData.country]);
 
+  // Backfill from originating lead when registration missed mapped fields
+  useEffect(() => {
+    if (!leadOrigin) return;
+    setStudentData(prev => {
+      const next = { ...prev };
+      let changed = false;
+      if (!prev.source_inquiry?.trim() && leadOrigin.referred_by) {
+        next.source_inquiry = normalizeSourceInquiry(leadOrigin.referred_by);
+        changed = true;
+      }
+      if (!prev.course?.trim() && (leadOrigin.course || leadOrigin.program)) {
+        next.course = leadOrigin.course || leadOrigin.program;
+        changed = true;
+      }
+      if (!prev.country?.trim()) {
+        const names = resolveLeadCountryNames(leadOrigin.countries_of_interest, leadOrigin.countries_other);
+        if (names.length) {
+          next.country = names.join(', ');
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [leadOrigin]);
+
   const fetchManualForm = async () => {
     try {
       const res  = await fetch(`${API_URL}/students/${id}/manual-form`);
@@ -367,10 +499,13 @@ export default function EditStudent() {
 
   const handleEmergencyChange = (e) => {
     const { name, value } = e.target;
+    if (emergencyLocked && name !== 'postal_code') return;
     setEmergencyContact(prev => ({ ...prev, [name]: value }));
   };
 
   const handleFamilyChange = (index, field, value) => {
+    const memberType = familyDetails[index]?.type;
+    if (memberType === 'Sponsor' && sponsorLocked && field !== 'sponsor_note') return;
     setFamilyDetails(prev => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
@@ -378,10 +513,20 @@ export default function EditStudent() {
     });
   };
 
-  // Sponsor relation type change handler
+  // Sponsor / Emergency relation type change handlers
   const handleSponsorRelationTypeChange = (newType) => {
     setSponsorRelationType(newType);
-    // Auto-fill will be triggered by the useEffect above
+    if (newType === 'Guardian') {
+      setFamilyDetails(prev => prev.map(m =>
+        m.type === 'Sponsor'
+          ? { ...m, full_name: '', relation: '', contact_no: '', email: '', profession: '', address: '', sponsor_note: '' }
+          : m
+      ));
+    }
+  };
+
+  const handleEmergencyRelationTypeChange = (newType) => {
+    setEmergencyRelationType(newType);
   };
 
   // Education
@@ -444,7 +589,7 @@ export default function EditStudent() {
           gender:       studentData.gender,
           cityOfBirth:  studentData.city_of_birth,
           countryOfBirth: studentData.country_of_birth,
-          passportNo:   studentData.passport_no,
+          passportNo:   serializePassportNumbers(passportNumbers),
           passportIssueDate: studentData.passport_issue_date,
           passportPlaceOfIssue: studentData.passport_place_of_issue,
           guardianName:     studentData.guardian_name,
@@ -480,7 +625,16 @@ export default function EditStudent() {
   // Submit (main form save)
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (viewOnly) return;
     setSaving(true); setError('');
+
+    const hasPicture = !!(profilePictureFile || studentData.profile_picture || profilePicturePreview);
+    if (!hasPicture) {
+      setError('Personal picture is required. Please upload a photo at the top of the form.');
+      setSaving(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
 
     const countryNames = assignedCountryIds
       .map(cid => allCountries.find(c => c.id === cid))
@@ -489,6 +643,25 @@ export default function EditStudent() {
       .join(', ');
 
     try {
+      if (profilePictureFile) {
+        const formData = new FormData();
+        formData.append('profilePicture', profilePictureFile);
+        const picRes = await fetch(`${API_URL}/students/${id}/profile-picture`, {
+          method: 'POST',
+          body: formData
+        });
+        const picData = await picRes.json();
+        if (!picData.success) {
+          setError(picData.message || 'Failed to upload personal picture');
+          setSaving(false);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+        setStudentData(prev => ({ ...prev, profile_picture: picData.profilePicture }));
+        setProfilePicturePreview(`${API_URL}${picData.profilePicture}`);
+        setProfilePictureFile(null);
+      }
+
       const response = await fetch(`${API_URL}/students/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -509,7 +682,7 @@ export default function EditStudent() {
           gender:       studentData.gender,
           cityOfBirth:  studentData.city_of_birth,
           countryOfBirth: studentData.country_of_birth,
-          passportNo:   studentData.passport_no,
+          passportNo:   serializePassportNumbers(passportNumbers),
           passportIssueDate: studentData.passport_issue_date,
           passportPlaceOfIssue: studentData.passport_place_of_issue,
           guardianName:     studentData.guardian_name,
@@ -540,6 +713,22 @@ export default function EditStudent() {
       setError('Network error. Please check your connection.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally { setSaving(false); }
+  };
+
+  const handleProfilePictureChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a valid image file for the personal picture.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Personal picture must be under 5MB.');
+      return;
+    }
+    setError('');
+    setProfilePictureFile(file);
+    setProfilePicturePreview(URL.createObjectURL(file));
   };
 
   // Manual form
@@ -575,6 +764,7 @@ export default function EditStudent() {
     setUploadingDocSlot(slot);
     setCustomDocName('');
     setDocFile(null);
+    setDocFiles([]);
     setShowDocumentModal(true);
   };
 
@@ -583,24 +773,46 @@ export default function EditStudent() {
     const docName = uploadingDocSlot ? uploadingDocSlot.name : customDocName.trim();
     const docType = uploadingDocSlot ? uploadingDocSlot.type : 'Other';
     const order   = uploadingDocSlot ? uploadingDocSlot.order : 99;
+    const isPassport = uploadingDocSlot?.name === 'Passport';
+    const filesToUpload = isPassport
+      ? (docFiles.length ? docFiles : (docFile ? [docFile] : []))
+      : (docFile ? [docFile] : []);
 
-    if (!docFile || !docName) { alert('Please select a file and provide a document name'); return; }
+    if (!filesToUpload.length || !docName) {
+      alert(isPassport
+        ? 'Please select one or more files to upload'
+        : 'Please select a file and provide a document name');
+      return;
+    }
     setUploadingDocument(true);
     try {
-      const formData = new FormData();
-      formData.append('document', docFile);
-      formData.append('documentName', docName);
-      formData.append('documentType', docType);
-      formData.append('displayOrder', order);
+      let uploadedCount = 0;
+      for (const file of filesToUpload) {
+        const formData = new FormData();
+        formData.append('document', file);
+        formData.append('documentName', docName);
+        formData.append('documentType', docType);
+        formData.append('displayOrder', order);
 
-      const res  = await fetch(`${API_URL}/students/${id}/documents`, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (data.success) {
-        alert('Document uploaded successfully');
+        const res  = await fetch(`${API_URL}/students/${id}/documents`, { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || `Failed to upload ${file.name}`);
+          break;
+        }
+        uploadedCount += 1;
+      }
+      if (uploadedCount > 0) {
+        alert(uploadedCount === 1
+          ? 'Document uploaded successfully'
+          : `${uploadedCount} documents uploaded successfully`);
         setShowDocumentModal(false);
-        setDocFile(null); setUploadingDocSlot(null); setCustomDocName('');
+        setDocFile(null);
+        setDocFiles([]);
+        setUploadingDocSlot(null);
+        setCustomDocName('');
         fetchStudentData();
-      } else { alert(data.message || 'Failed to upload'); }
+      }
     } catch (err) { alert('Network error.'); }
     finally { setUploadingDocument(false); }
   };
@@ -714,6 +926,7 @@ export default function EditStudent() {
   }[status] || 'meeting-scheduled');
 
   const getDocForSlot = (slotName) => documents.find(d => d.document_name === slotName);
+  const getDocsForSlot = (slotName) => documents.filter(d => d.document_name === slotName);
 
   const getApplicationStatusColor = (status) => {
     const map = {
@@ -729,11 +942,11 @@ export default function EditStudent() {
 
   if (loading) {
     return (
-      <><Sidebar />
+      <ViewModeWrap viewOnly={viewOnly}><Sidebar />
         <div className="main-content" id="mainContent"><Header />
           <div style={{ textAlign: 'center', padding: '40px' }}><p>Loading student data...</p></div>
         </div>
-      </>
+      </ViewModeWrap>
     );
   }
 
@@ -754,12 +967,8 @@ export default function EditStudent() {
     borderLeft: '3px solid #F47B20'
   };
 
-  // Helper: get sponsor index in familyDetails array
-  const sponsorIndex = familyDetails.findIndex(m => m.type === 'Sponsor');
-  const sponsorMember = familyDetails[sponsorIndex] || emptyFamilyMember('Sponsor');
-
   return (
-    <>
+    <ViewModeWrap viewOnly={viewOnly}>
       <Sidebar />
       <div className="main-content" id="mainContent">
         <Header />
@@ -770,7 +979,7 @@ export default function EditStudent() {
             <div className="header-left">
               <h1>
                 <FontAwesomeIcon icon={faUserGraduate} className="page-icon" />
-                Edit Student
+                {viewOnly ? 'Student Details' : 'Edit Student'}
               </h1>
             </div>
             <div className="header-right">
@@ -951,6 +1160,55 @@ export default function EditStudent() {
             ====================================================== */}
             <div style={sectionStyle}>
               <h2 style={sectionTitleStyle}>Applicant's Information</h2>
+
+              {/* Personal Picture */}
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                marginBottom: '28px', padding: '24px 16px',
+                background: 'linear-gradient(135deg, #FFF8F0 0%, #F5F7FA 100%)',
+                borderRadius: '16px', border: '1px solid #FFE0B2'
+              }}>
+                <div style={{
+                  width: '140px', height: '140px', borderRadius: '50%',
+                  overflow: 'hidden', background: '#fff',
+                  border: profilePicturePreview ? '3px solid #F47B20' : '3px dashed #d1d5db',
+                  boxShadow: '0 8px 24px rgba(244,123,32,0.15)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginBottom: '14px'
+                }}>
+                  {profilePicturePreview ? (
+                    <img src={profilePicturePreview} alt="Student"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <FontAwesomeIcon icon={faUser} style={{ fontSize: '52px', color: '#d1d5db' }} />
+                  )}
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '15px', color: '#111827', marginBottom: '4px' }}>
+                  Personal Picture <span className="required">*</span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px', textAlign: 'center' }}>
+                  Required passport-style photo · JPG / PNG · Max 5MB
+                </div>
+                <label className="btn-primary" style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '8px',
+                  cursor: 'pointer', margin: 0, fontSize: '13px', padding: '8px 16px'
+                }}>
+                  <FontAwesomeIcon icon={faCamera} />
+                  {profilePicturePreview ? 'Change Photo' : 'Upload Photo'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+                    onChange={handleProfilePictureChange}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                {!profilePicturePreview && (
+                  <div style={{ marginTop: '10px', fontSize: '12px', color: '#c62828' }}>
+                    Form cannot be submitted without a personal picture
+                  </div>
+                )}
+              </div>
+
               <div className="row">
 
                 <div className="col-md-4">
@@ -1039,8 +1297,40 @@ export default function EditStudent() {
                 <div className="col-md-4">
                   <div className="form-group">
                     <label>Passport No.</label>
-                    <input type="text" name="passport_no" className="input-field form-control"
-                      value={studentData.passport_no || ''} onChange={handleInputChange} />
+                    {passportNumbers.map((num, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: idx < passportNumbers.length - 1 ? '8px' : 0 }}>
+                        <input
+                          type="text"
+                          className="input-field form-control"
+                          value={num}
+                          placeholder={idx === 0 ? 'Passport number' : `Passport number #${idx + 1}`}
+                          onChange={(e) => {
+                            const next = [...passportNumbers];
+                            next[idx] = e.target.value;
+                            setPassportNumbers(next);
+                          }}
+                        />
+                        {passportNumbers.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn-icon btn-delete"
+                            title="Remove"
+                            onClick={() => setPassportNumbers(passportNumbers.filter((_, i) => i !== idx))}
+                            style={{ width: '38px', height: '38px', flexShrink: 0 }}
+                          >
+                            <FontAwesomeIcon icon={faTrash} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      style={{ marginTop: '8px', fontSize: '12px' }}
+                      onClick={() => setPassportNumbers([...passportNumbers, ''])}
+                    >
+                      <FontAwesomeIcon icon={faPlus} /> Add Passport Number
+                    </button>
                   </div>
                 </div>
                 <div className="col-md-4">
@@ -1118,12 +1408,9 @@ export default function EditStudent() {
                     <select name="source_inquiry" className="input-field form-control"
                       value={studentData.source_inquiry || ''} onChange={handleInputChange}>
                       <option value="">Select Source</option>
-                      <option value="website">Website</option>
-                      <option value="referral">Referral</option>
-                      <option value="social-media">Social Media</option>
-                      <option value="advertisement">Advertisement</option>
-                      <option value="walk-in">Walk-in</option>
-                      <option value="other">Other</option>
+                      {REFERRED_BY_OPTIONS.map(option => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -1149,158 +1436,13 @@ export default function EditStudent() {
             </div>
 
             {/* ======================================================
-                SECTION 2: ASSIGNED COUNTRIES
-            ====================================================== */}
-            <div style={sectionStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ ...sectionTitleStyle, marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
-                  <FontAwesomeIcon icon={faGlobe} style={{ color: '#F47B20' }} />
-                  Assigned Countries
-                </h2>
-                <button type="button" className="btn-primary btn-sm"
-                  onClick={() => setShowAssignCountriesModal(true)}>
-                  <FontAwesomeIcon icon={faPencilAlt} /> Edit Countries
-                </button>
-              </div>
-
-              {assignedCountryIds.length > 0 ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {assignedCountryIds.map(cid => {
-                    const country = allCountries.find(c => c.id === cid);
-                    if (!country) return null;
-                    return (
-                      <div key={cid} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: '8px',
-                        padding: '8px 16px', background: '#fff7ed',
-                        border: '1.5px solid #F47B20', borderRadius: '25px',
-                        fontSize: '14px', fontWeight: '600', color: '#c2440e'
-                      }}>
-                        <FontAwesomeIcon icon={faGlobe} style={{ fontSize: '13px', color: '#F47B20' }} />
-                        {country.country_name}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="no-data-message">
-                  <FontAwesomeIcon icon={faGlobe} className="no-data-icon" style={{ opacity: 0.25, fontSize: '36px', display: 'block', marginBottom: '10px' }} />
-                  <p>No countries assigned yet. Click <strong>Edit Countries</strong> or use the <strong>Assign Countries</strong> button above to add countries.</p>
-                </div>
-              )}
-            </div>
-
-            {/* ======================================================
-                SECTION 3: ASSIGNED COUNSELORS
-            ====================================================== */}
-            <div style={sectionStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ ...sectionTitleStyle, marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
-                  <FontAwesomeIcon icon={faUserTie} style={{ color: '#F47B20' }} />
-                  Assigned Counselors
-                </h2>
-                <button type="button" className="btn-primary btn-sm"
-                  onClick={() => setShowCounselorModal(true)}>
-                  <FontAwesomeIcon icon={faPlus} /> Add Counselor
-                </button>
-              </div>
-
-              {assignedCounselors.length > 0 ? (
-                <div className="row g-3">
-                  {assignedCounselors.map(counselor => (
-                    <div key={counselor.id} className="col-md-6">
-                      <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', background: 'white' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-                          <div>
-                            <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>{counselor.name}</h4>
-                            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#6b7280' }}>{counselor.counselor_id}</p>
-                          </div>
-                          <button type="button" className="btn-icon btn-delete"
-                            onClick={() => handleRemoveCounselor(counselor.id)}>
-                            <FontAwesomeIcon icon={faTrash} />
-                          </button>
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px' }}>
-                          <strong>Email:</strong> {counselor.email}
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '15px' }}>
-                          <strong>Experience:</strong> {counselor.experience}
-                        </div>
-                        <button type="button" className="btn-primary" style={{ width: '100%' }}
-                          onClick={() => { setSelectedCounselorForMeeting(counselor); setShowMeetingModal(true); }}>
-                          <FontAwesomeIcon icon={faCalendarAlt} /> Schedule Meeting
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="no-data-message">
-                  <FontAwesomeIcon icon={faUserTie} className="no-data-icon" />
-                  <p>No counselors assigned yet.</p>
-                </div>
-              )}
-            </div>
-
-            {/* ======================================================
-                SECTION 4: EMERGENCY CONTACT
-            ====================================================== */}
-            <div style={sectionStyle}>
-              <h2 style={sectionTitleStyle}>Emergency Contact Details</h2>
-              <div className="row">
-                <div className="col-md-6">
-                  <div className="form-group">
-                    <label>Full Name</label>
-                    <input type="text" name="full_name" className="input-field form-control"
-                      value={emergencyContact.full_name} onChange={handleEmergencyChange} />
-                  </div>
-                </div>
-                <div className="col-md-6">
-                  <div className="form-group">
-                    <label>Relation</label>
-                    <input type="text" name="relation" className="input-field form-control"
-                      value={emergencyContact.relation} onChange={handleEmergencyChange} />
-                  </div>
-                </div>
-                <div className="col-md-6">
-                  <div className="form-group">
-                    <label>Contact No.</label>
-                    <input type="tel" name="contact_no" className="input-field form-control"
-                      value={emergencyContact.contact_no} onChange={handleEmergencyChange} />
-                  </div>
-                </div>
-                <div className="col-md-6">
-                  <div className="form-group">
-                    <label>Email</label>
-                    <input type="email" name="email" className="input-field form-control"
-                      value={emergencyContact.email} onChange={handleEmergencyChange} />
-                  </div>
-                </div>
-                <div className="col-md-9">
-                  <div className="form-group">
-                    <label>Current Residential Address</label>
-                    <textarea name="address" className="input-field form-control" rows="2"
-                      value={emergencyContact.address} onChange={handleEmergencyChange}></textarea>
-                  </div>
-                </div>
-                <div className="col-md-3">
-                  <div className="form-group">
-                    <label>Postal Code</label>
-                    <input type="text" name="postal_code" className="input-field form-control"
-                      value={emergencyContact.postal_code} onChange={handleEmergencyChange} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* ======================================================
-                SECTION 5: PARENTS / SPONSOR DETAILS
+                SECTION 2: PARENTS DETAILS
             ====================================================== */}
             <div style={sectionStyle}>
               <h2 style={sectionTitleStyle}>Parents Details</h2>
 
               {familyDetails.map((member, index) => (
                 <div key={member.type}>
-                  {/* ---- Father ---- */}
                   {member.type === 'Father' && (
                     <>
                       <h3 style={subTitleStyle}>Father</h3>
@@ -1358,7 +1500,6 @@ export default function EditStudent() {
                     </>
                   )}
 
-                  {/* ---- Mother ---- */}
                   {member.type === 'Mother' && (
                     <>
                       <h3 style={subTitleStyle}>Mother</h3>
@@ -1412,98 +1553,6 @@ export default function EditStudent() {
                           </div>
                         </div>
                       </div>
-                      <hr style={{ margin: '8px 0 20px', borderColor: '#f3f4f6' }} />
-                    </>
-                  )}
-
-                  {/* ---- Sponsor (with relation type dropdown) ---- */}
-                  {member.type === 'Sponsor' && (
-                    <>
-                      <h3 style={subTitleStyle}>Sponsor / Guardian</h3>
-
-                      {/* Relation type selector */}
-                      <div className="row" style={{ marginBottom: '4px' }}>
-                        <div className="col-md-6">
-                          <div className="form-group">
-                            <label>Sponsor is the Student's</label>
-                            <select
-                              className="input-field form-control"
-                              value={sponsorRelationType}
-                              onChange={e => handleSponsorRelationTypeChange(e.target.value)}
-                            >
-                              <option value="Father">Father (auto-fill from Father details)</option>
-                              <option value="Mother">Mother (auto-fill from Mother details)</option>
-                              <option value="Guardian">Guardian (enter manually)</option>
-                            </select>
-                            {sponsorRelationType !== 'Guardian' && (
-                              <small style={{ color: '#6b7280', fontSize: '12px', display: 'block', marginTop: '5px' }}>
-                                Fields auto-filled from {sponsorRelationType} details above — you can edit them here independently.
-                              </small>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="row">
-                        <div className="col-md-4">
-                          <div className="form-group">
-                            <label>Full Name</label>
-                            <input type="text" className="input-field form-control"
-                              value={member.full_name || ''}
-                              onChange={e => handleFamilyChange(index, 'full_name', e.target.value)} />
-                          </div>
-                        </div>
-                        <div className="col-md-4">
-                          <div className="form-group">
-                            <label>Relation</label>
-                            <input type="text" className="input-field form-control"
-                              value={member.relation || ''}
-                              onChange={e => handleFamilyChange(index, 'relation', e.target.value)}
-                              placeholder="e.g. Father, Mother, Uncle" />
-                          </div>
-                        </div>
-                        <div className="col-md-4">
-                          <div className="form-group">
-                            <label>Profession</label>
-                            <input type="text" className="input-field form-control"
-                              value={member.profession || ''}
-                              onChange={e => handleFamilyChange(index, 'profession', e.target.value)} />
-                          </div>
-                        </div>
-                        <div className="col-md-4">
-                          <div className="form-group">
-                            <label>Contact No.</label>
-                            <input type="tel" className="input-field form-control"
-                              value={member.contact_no || ''}
-                              onChange={e => handleFamilyChange(index, 'contact_no', e.target.value)} />
-                          </div>
-                        </div>
-                        <div className="col-md-8">
-                          <div className="form-group">
-                            <label>Email</label>
-                            <input type="email" className="input-field form-control"
-                              value={member.email || ''}
-                              onChange={e => handleFamilyChange(index, 'email', e.target.value)} />
-                          </div>
-                        </div>
-                        <div className="col-md-12">
-                          <div className="form-group">
-                            <label>Current Residential Address</label>
-                            <textarea className="input-field form-control" rows="2"
-                              value={member.address || ''}
-                              onChange={e => handleFamilyChange(index, 'address', e.target.value)}></textarea>
-                          </div>
-                        </div>
-                        <div className="col-md-12">
-                          <div className="form-group">
-                            <label>Additional Notes</label>
-                            <input type="text" className="input-field form-control"
-                              placeholder="Any additional notes about the sponsor"
-                              value={member.sponsor_note || ''}
-                              onChange={e => handleFamilyChange(index, 'sponsor_note', e.target.value)} />
-                          </div>
-                        </div>
-                      </div>
                     </>
                   )}
                 </div>
@@ -1511,17 +1560,294 @@ export default function EditStudent() {
             </div>
 
             {/* ======================================================
-                SECTION 6: EDUCATION HISTORY
+                SECTION 3: SPONSOR / GUARDIAN
             ====================================================== */}
             <div style={sectionStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={sectionTitleStyle}>Sponsor / Guardian</h2>
+              {(() => {
+                const sponsorIndex = familyDetails.findIndex(m => m.type === 'Sponsor');
+                const member = familyDetails[sponsorIndex] || emptyFamilyMember('Sponsor');
+                return (
+                  <>
+                    <div className="row" style={{ marginBottom: '4px' }}>
+                      <div className="col-md-6">
+                        <div className="form-group">
+                          <label>Sponsor is the Student's</label>
+                          <select
+                            className="input-field form-control"
+                            value={sponsorRelationType}
+                            onChange={e => handleSponsorRelationTypeChange(e.target.value)}
+                          >
+                            <option value="Father">Father (auto-fill from Father details)</option>
+                            <option value="Mother">Mother (auto-fill from Mother details)</option>
+                            <option value="Guardian">Guardian (enter manually)</option>
+                          </select>
+                          {sponsorLocked && (
+                            <small style={{ color: '#6b7280', fontSize: '12px', display: 'block', marginTop: '5px' }}>
+                              Fields auto-filled from {sponsorRelationType} details — not editable.
+                            </small>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="row">
+                      <div className="col-md-4">
+                        <div className="form-group">
+                          <label>Full Name</label>
+                          <input type="text" className="input-field form-control"
+                            value={member.full_name || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'full_name', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="form-group">
+                          <label>Relation</label>
+                          <input type="text" className="input-field form-control"
+                            value={member.relation || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'relation', e.target.value)}
+                            placeholder="e.g. Father, Mother, Uncle"
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="form-group">
+                          <label>Profession</label>
+                          <input type="text" className="input-field form-control"
+                            value={member.profession || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'profession', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="form-group">
+                          <label>Contact No.</label>
+                          <input type="tel" className="input-field form-control"
+                            value={member.contact_no || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'contact_no', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                        </div>
+                      </div>
+                      <div className="col-md-8">
+                        <div className="form-group">
+                          <label>Email</label>
+                          <input type="email" className="input-field form-control"
+                            value={member.email || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'email', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                        </div>
+                      </div>
+                      <div className="col-md-12">
+                        <div className="form-group">
+                          <label>Current Residential Address</label>
+                          <textarea className="input-field form-control" rows="2"
+                            value={member.address || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'address', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined}></textarea>
+                        </div>
+                      </div>
+                      <div className="col-md-12">
+                        <div className="form-group">
+                          <label>Additional Notes</label>
+                          <input type="text" className="input-field form-control"
+                            placeholder="Any additional notes about the sponsor"
+                            value={member.sponsor_note || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'sponsor_note', e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* ======================================================
+                SECTION 4: EMERGENCY CONTACT
+            ====================================================== */}
+            <div style={sectionStyle}>
+              <h2 style={sectionTitleStyle}>Emergency Contact Details</h2>
+              <div className="row" style={{ marginBottom: '4px' }}>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Emergency Contact is the Student's</label>
+                    <select
+                      className="input-field form-control"
+                      value={emergencyRelationType}
+                      onChange={e => handleEmergencyRelationTypeChange(e.target.value)}
+                    >
+                      <option value="Father">Father (auto-fill from Father details)</option>
+                      <option value="Mother">Mother (auto-fill from Mother details)</option>
+                      <option value="Guardian">Guardian (auto-fill from Sponsor / Guardian)</option>
+                    </select>
+                    <small style={{ color: '#6b7280', fontSize: '12px', display: 'block', marginTop: '5px' }}>
+                      Fields auto-filled from {emergencyRelationType === 'Guardian' ? 'Sponsor / Guardian' : emergencyRelationType} details — not editable.
+                    </small>
+                  </div>
+                </div>
+              </div>
+              <div className="row">
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Full Name</label>
+                    <input type="text" name="full_name" className="input-field form-control"
+                      value={emergencyContact.full_name} onChange={handleEmergencyChange}
+                      readOnly={emergencyLocked}
+                      style={emergencyLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Relation</label>
+                    <input type="text" name="relation" className="input-field form-control"
+                      value={emergencyContact.relation} onChange={handleEmergencyChange}
+                      readOnly={emergencyLocked}
+                      style={emergencyLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Contact No.</label>
+                    <input type="tel" name="contact_no" className="input-field form-control"
+                      value={emergencyContact.contact_no} onChange={handleEmergencyChange}
+                      readOnly={emergencyLocked}
+                      style={emergencyLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" className="input-field form-control"
+                      value={emergencyContact.email} onChange={handleEmergencyChange}
+                      readOnly={emergencyLocked}
+                      style={emergencyLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                  </div>
+                </div>
+                <div className="col-md-9">
+                  <div className="form-group">
+                    <label>Current Residential Address</label>
+                    <textarea name="address" className="input-field form-control" rows="2"
+                      value={emergencyContact.address} onChange={handleEmergencyChange}
+                      readOnly={emergencyLocked}
+                      style={emergencyLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined}></textarea>
+                  </div>
+                </div>
+                <div className="col-md-3">
+                  <div className="form-group">
+                    <label>Postal Code</label>
+                    <input type="text" name="postal_code" className="input-field form-control"
+                      value={emergencyContact.postal_code} onChange={handleEmergencyChange} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ======================================================
+                SECTION 5: ASSIGNED COUNTRIES
+            ====================================================== */}
+            <div style={sectionStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h2 style={{ ...sectionTitleStyle, marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
-                  Applicant's Education Details
+                  <FontAwesomeIcon icon={faGlobe} style={{ color: '#F47B20' }} />
+                  Assigned Countries
                 </h2>
-                <button type="button" className="btn-primary btn-sm" onClick={addEducation}>
-                  <FontAwesomeIcon icon={faPlus} /> Add Education
+                <button type="button" className="btn-primary btn-sm"
+                  onClick={() => setShowAssignCountriesModal(true)}>
+                  <FontAwesomeIcon icon={faPencilAlt} /> Edit Countries
                 </button>
               </div>
+
+              {assignedCountryIds.length > 0 ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                  {assignedCountryIds.map(cid => {
+                    const country = allCountries.find(c => c.id === cid);
+                    if (!country) return null;
+                    return (
+                      <div key={cid} style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '8px',
+                        padding: '8px 16px', background: '#fff7ed',
+                        border: '1.5px solid #F47B20', borderRadius: '25px',
+                        fontSize: '14px', fontWeight: '600', color: '#c2440e'
+                      }}>
+                        <FontAwesomeIcon icon={faGlobe} style={{ fontSize: '13px', color: '#F47B20' }} />
+                        {country.country_name}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="no-data-message">
+                  <FontAwesomeIcon icon={faGlobe} className="no-data-icon" style={{ opacity: 0.25, fontSize: '36px', display: 'block', marginBottom: '10px' }} />
+                  <p>No countries assigned yet. Click <strong>Edit Countries</strong> or use the <strong>Assign Countries</strong> button above to add countries.</p>
+                </div>
+              )}
+            </div>
+
+            {/* ======================================================
+                SECTION 6: ASSIGNED COUNSELORS
+            ====================================================== */}
+            <div style={sectionStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 style={{ ...sectionTitleStyle, marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
+                  <FontAwesomeIcon icon={faUserTie} style={{ color: '#F47B20' }} />
+                  Assigned Counselors
+                </h2>
+                <button type="button" className="btn-primary btn-sm"
+                  onClick={() => setShowCounselorModal(true)}>
+                  <FontAwesomeIcon icon={faPlus} /> Add Counselor
+                </button>
+              </div>
+
+              {assignedCounselors.length > 0 ? (
+                <div className="row g-3">
+                  {assignedCounselors.map(counselor => (
+                    <div key={counselor.id} className="col-md-6">
+                      <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', background: 'white' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>{counselor.name}</h4>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#6b7280' }}>{counselor.counselor_id}</p>
+                          </div>
+                          <button type="button" className="btn-icon btn-delete"
+                            onClick={() => handleRemoveCounselor(counselor.id)}>
+                            <FontAwesomeIcon icon={faTrash} />
+                          </button>
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px' }}>
+                          <strong>Email:</strong> {counselor.email}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '15px' }}>
+                          <strong>Experience:</strong> {counselor.experience}
+                        </div>
+                        <button type="button" className="btn-primary" style={{ width: '100%' }}
+                          onClick={() => { setSelectedCounselorForMeeting(counselor); setShowMeetingModal(true); }}>
+                          <FontAwesomeIcon icon={faCalendarAlt} /> Schedule Meeting
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="no-data-message">
+                  <FontAwesomeIcon icon={faUserTie} className="no-data-icon" />
+                  <p>No counselors assigned yet.</p>
+                </div>
+              )}
+            </div>
+
+            {/* ======================================================
+                SECTION 7: EDUCATION HISTORY
+            ====================================================== */}
+            <div style={sectionStyle}>
+              <h2 style={{ ...sectionTitleStyle, marginBottom: '8px' }}>
+                Applicant's Education Details
+              </h2>
               <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
                 Educational History (in descending order — most recent first)
               </p>
@@ -1611,15 +1937,15 @@ export default function EditStudent() {
                   <p>No education records added yet. Click "Add Education" to begin.</p>
                 </div>
               )}
+              <div style={{ marginTop: '12px' }}>
+                <button type="button" className="btn-primary btn-sm" onClick={addEducation}>
+                  <FontAwesomeIcon icon={faPlus} /> Add Education
+                </button>
+              </div>
 
               {/* Co-curricular Activities */}
               <div style={{ marginTop: '28px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 style={subTitleStyle}>Co-curricular Activities / Achievements</h3>
-                  <button type="button" className="btn-primary btn-sm" onClick={addActivity}>
-                    <FontAwesomeIcon icon={faPlus} /> Add Activity
-                  </button>
-                </div>
+                <h3 style={subTitleStyle}>Co-curricular Activities / Achievements</h3>
 
                 {activities.length > 0 ? (
                   activities.map((act, index) => (
@@ -1683,16 +2009,16 @@ export default function EditStudent() {
                     <p>No activities added yet.</p>
                   </div>
                 )}
+                <div style={{ marginTop: '12px' }}>
+                  <button type="button" className="btn-primary btn-sm" onClick={addActivity}>
+                    <FontAwesomeIcon icon={faPlus} /> Add Activity
+                  </button>
+                </div>
               </div>
 
               {/* Awards */}
               <div style={{ marginTop: '28px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 style={subTitleStyle}>Awards</h3>
-                  <button type="button" className="btn-primary btn-sm" onClick={addAward}>
-                    <FontAwesomeIcon icon={faPlus} /> Add Award
-                  </button>
-                </div>
+                <h3 style={subTitleStyle}>Awards</h3>
 
                 {awards.length > 0 ? (
                   awards.map((award, index) => (
@@ -1762,6 +2088,11 @@ export default function EditStudent() {
                 ) : (
                   <div className="no-data-message"><p>No awards added yet.</p></div>
                 )}
+                <div style={{ marginTop: '12px' }}>
+                  <button type="button" className="btn-primary btn-sm" onClick={addAward}>
+                    <FontAwesomeIcon icon={faPlus} /> Add Award
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1769,14 +2100,9 @@ export default function EditStudent() {
                 SECTION 7: WORK EXPERIENCE
             ====================================================== */}
             <div style={sectionStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ ...sectionTitleStyle, marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
-                  Applicant's Work Experience
-                </h2>
-                <button type="button" className="btn-primary btn-sm" onClick={addWork}>
-                  <FontAwesomeIcon icon={faPlus} /> Add Experience
-                </button>
-              </div>
+              <h2 style={{ ...sectionTitleStyle, marginBottom: '20px' }}>
+                Applicant's Work Experience
+              </h2>
 
               {workExperiences.length > 0 ? (
                 workExperiences.map((exp, index) => (
@@ -1847,6 +2173,11 @@ export default function EditStudent() {
               ) : (
                 <div className="no-data-message"><p>No work experience added yet.</p></div>
               )}
+              <div style={{ marginTop: '12px' }}>
+                <button type="button" className="btn-primary btn-sm" onClick={addWork}>
+                  <FontAwesomeIcon icon={faPlus} /> Add Experience
+                </button>
+              </div>
             </div>
 
             {/* ======================================================
@@ -1865,26 +2196,82 @@ export default function EditStudent() {
 
               <div className="row g-3">
                 {PREDEFINED_DOCS.map((slot) => {
-                  const uploaded = getDocForSlot(slot.name);
+                  const isPassport = slot.name === 'Passport';
+                  const uploadedList = isPassport ? getDocsForSlot(slot.name) : [];
+                  const uploaded = isPassport ? null : getDocForSlot(slot.name);
+                  const hasFiles = isPassport ? uploadedList.length > 0 : !!uploaded;
+
                   return (
                     <div key={slot.name} className="col-md-6">
                       <div style={{
-                        border: uploaded ? '2px solid #22c55e' : '2px dashed #d1d5db',
-                        borderRadius: '12px', padding: '18px', background: uploaded ? '#f0fdf4' : '#fafafa',
+                        border: hasFiles ? '2px solid #22c55e' : '2px dashed #d1d5db',
+                        borderRadius: '12px', padding: '18px', background: hasFiles ? '#f0fdf4' : '#fafafa',
                         transition: 'all 0.2s'
                       }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
                               <FontAwesomeIcon
-                                icon={uploaded ? faCheckCircle : faFileAlt}
-                                style={{ color: uploaded ? '#22c55e' : '#9ca3af', fontSize: '20px' }}
+                                icon={hasFiles ? faCheckCircle : faFileAlt}
+                                style={{ color: hasFiles ? '#22c55e' : '#9ca3af', fontSize: '20px' }}
                               />
-                              <span style={{ fontWeight: '600', fontSize: '14px', color: uploaded ? '#166534' : '#374151' }}>
+                              <span style={{ fontWeight: '600', fontSize: '14px', color: hasFiles ? '#166534' : '#374151' }}>
                                 {slot.name}
+                                {isPassport && uploadedList.length > 0 && (
+                                  <span style={{ fontWeight: 500, color: '#6b7280', marginLeft: '6px' }}>
+                                    ({uploadedList.length})
+                                  </span>
+                                )}
                               </span>
                             </div>
-                            {uploaded ? (
+
+                            {isPassport ? (
+                              uploadedList.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                  {uploadedList.map((doc, idx) => (
+                                    <div key={doc.id} style={{
+                                      background: '#fff', border: '1px solid #d1fae5', borderRadius: '8px',
+                                      padding: '8px 10px', display: 'flex', justifyContent: 'space-between',
+                                      alignItems: 'center', gap: '8px'
+                                    }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534' }}>
+                                          File #{idx + 1}
+                                        </div>
+                                        <span style={{
+                                          display: 'inline-block', padding: '2px 8px',
+                                          background: doc.verified ? '#dcfce7' : '#fef9c3',
+                                          color: doc.verified ? '#166534' : '#854d0e',
+                                          borderRadius: '20px', fontSize: '11px', marginTop: '4px'
+                                        }}>
+                                          {doc.verified ? 'Verified' : 'Not Verified'}
+                                        </span>
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                        <label className="toggle-switch" style={{ margin: 0 }}>
+                                          <input type="checkbox" checked={!!doc.verified}
+                                            onChange={() => handleToggleVerified(doc.id, doc.verified)} />
+                                          <span className="toggle-slider"></span>
+                                        </label>
+                                        <a href={`${API_URL}${doc.file_path}`} target="_blank" rel="noopener noreferrer"
+                                          className="btn-secondary btn-sm" style={{ fontSize: '11px', padding: '4px 8px' }}>
+                                          <FontAwesomeIcon icon={faDownload} />
+                                        </a>
+                                        <button type="button" className="btn-icon btn-delete"
+                                          onClick={() => handleDeleteDocument(doc.id)}
+                                          style={{ width: '28px', height: '28px' }}>
+                                          <FontAwesomeIcon icon={faTrash} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p style={{ fontSize: '12px', color: '#9ca3af', margin: '0 0 8px' }}>
+                                  No passport files uploaded yet — you can upload multiple
+                                </p>
+                              )
+                            ) : uploaded ? (
                               <div style={{ fontSize: '12px', color: '#6b7280' }}>
                                 <span style={{
                                   display: 'inline-block', padding: '2px 8px',
@@ -1903,7 +2290,13 @@ export default function EditStudent() {
                           </div>
 
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
-                            {uploaded ? (
+                            {isPassport ? (
+                              <button type="button"
+                                onClick={() => openDocumentUpload(slot)}
+                                className="btn-primary btn-sm" style={{ fontSize: '12px' }}>
+                                <FontAwesomeIcon icon={faUpload} /> {uploadedList.length ? 'Add More' : 'Upload'}
+                              </button>
+                            ) : uploaded ? (
                               <>
                                 <label className="toggle-switch" style={{ margin: '0 0 4px' }}>
                                   <input type="checkbox" checked={uploaded.verified}
@@ -2352,13 +2745,44 @@ export default function EditStudent() {
                       )}
                       <div className="col-12">
                         <div className="modal-form-group">
-                          <label>Select File <span className="required">*</span></label>
-                          <input type="file" className="input-field"
-                            onChange={e => setDocFile(e.target.files[0])}
-                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" required />
-                          <small style={{ display: 'block', marginTop: '8px', color: '#6b7280', fontSize: '12px' }}>
-                            Accepted: PDF, DOC, DOCX, JPG, PNG (Max 10MB)
-                          </small>
+                          <label>
+                            {uploadingDocSlot?.name === 'Passport' ? 'Select File(s)' : 'Select File'}{' '}
+                            <span className="required">*</span>
+                          </label>
+                          {uploadingDocSlot?.name === 'Passport' ? (
+                            <>
+                              <input
+                                type="file"
+                                className="input-field"
+                                multiple
+                                onChange={e => {
+                                  const files = Array.from(e.target.files || []);
+                                  setDocFiles(files);
+                                  setDocFile(files[0] || null);
+                                }}
+                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                required
+                              />
+                              {docFiles.length > 0 && (
+                                <div style={{ marginTop: '8px', fontSize: '12px', color: '#166534' }}>
+                                  {docFiles.length} file{docFiles.length > 1 ? 's' : ''} selected:{' '}
+                                  {docFiles.map(f => f.name).join(', ')}
+                                </div>
+                              )}
+                              <small style={{ display: 'block', marginTop: '8px', color: '#6b7280', fontSize: '12px' }}>
+                                You can select multiple passport files at once. Accepted: PDF, DOC, DOCX, JPG, PNG (Max 10MB each)
+                              </small>
+                            </>
+                          ) : (
+                            <>
+                              <input type="file" className="input-field"
+                                onChange={e => { setDocFile(e.target.files[0]); setDocFiles([]); }}
+                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" required />
+                              <small style={{ display: 'block', marginTop: '8px', color: '#6b7280', fontSize: '12px' }}>
+                                Accepted: PDF, DOC, DOCX, JPG, PNG (Max 10MB)
+                              </small>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2673,6 +3097,6 @@ export default function EditStudent() {
           </div>
         </>
       )}
-    </>
+    </ViewModeWrap>
   );
 }

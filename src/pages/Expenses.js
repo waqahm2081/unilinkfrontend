@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import '../styles/dashboard.css'
+import '../styles/logs.css'
+import '../styles/leads.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import PrintReportButton from '../components/PrintReportButton'
+import DateRangeFilter from '../components/DateRangeFilter'
+import ListPagination from '../components/ListPagination'
+import useListPagination from '../hooks/useListPagination'
+import { EMPTY_DATE_RANGE, hasDateRange } from '../utils/dateRange'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faReceipt,
@@ -42,6 +49,7 @@ export default function Expenses() {
   const [filterCategory, setFilterCategory] = useState('');
   const [filterPaymentMode, setFilterPaymentMode] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
 
   // Modal
   const [showModal, setShowModal] = useState(false);
@@ -57,7 +65,7 @@ export default function Expenses() {
 
   useEffect(() => {
     fetchExpenses();
-  }, [filterCategory, filterPaymentMode, searchQuery]);
+  }, [filterCategory, filterPaymentMode, searchQuery, dateRange]);
 
   const fetchExpenses = async () => {
     setLoading(true);
@@ -67,6 +75,10 @@ export default function Expenses() {
       if (filterCategory) params.append('category', filterCategory);
       if (filterPaymentMode) params.append('paymentMode', filterPaymentMode);
       if (searchQuery) params.append('searchQuery', searchQuery);
+      if (hasDateRange(dateRange)) {
+        if (dateRange.from) params.append('startDate', dateRange.from);
+        if (dateRange.to) params.append('endDate', dateRange.to);
+      }
 
       const response = await fetch(`${API_URL}/expenses?${params.toString()}`);
       const data = await response.json();
@@ -191,6 +203,30 @@ export default function Expenses() {
     return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
+  const hasActiveFilters = searchQuery.trim() || filterCategory || filterPaymentMode || hasDateRange(dateRange);
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilterCategory('');
+    setFilterPaymentMode('');
+    setDateRange(EMPTY_DATE_RANGE);
+  };
+
+  const { paginatedItems: paginatedExpenses, totalPages, currentPage, goToPage } = useListPagination(
+    expenses,
+    [searchQuery, filterCategory, filterPaymentMode, dateRange.from, dateRange.to].join('|')
+  );
+
+  const printColumns = [
+    { header: 'Expense ID', value: (r) => r.expense_id },
+    { header: 'Category', value: (r) => r.category },
+    { header: 'Name', value: (r) => r.name },
+    { header: 'Description', value: (r) => r.description || '-' },
+    { header: 'Amount', value: (r) => formatAmount(r.amount) },
+    { header: 'Payment Mode', value: (r) => r.payment_mode },
+    { header: 'Date', value: (r) => formatDate(r.expense_date) },
+  ];
+
   return (
     <>
       <Sidebar />
@@ -207,6 +243,17 @@ export default function Expenses() {
               </h1>
             </div>
             <div className="header-right">
+              <PrintReportButton
+                show={hasActiveFilters}
+                title="Expense Management"
+                columns={printColumns}
+                rows={expenses}
+              />
+              {hasActiveFilters && (
+                <button className="btn-clear-all-filters" onClick={clearAllFilters}>
+                  <FontAwesomeIcon icon={faTimes} /> Clear All Filters
+                </button>
+              )}
               <button className="btn-primary" onClick={openCreateModal}>
                 <FontAwesomeIcon icon={faPlus} />
                 Add Expense
@@ -266,12 +313,18 @@ export default function Expenses() {
                 {PAYMENT_MODES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+            <DateRangeFilter
+              label="Expense Date"
+              value={dateRange}
+              onChange={setDateRange}
+            />
           </div>
 
           {/* Table */}
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px' }}><p>Loading expenses...</p></div>
           ) : (
+            <>
             <div className="logs-table-container">
               <table className="logs-table">
                 <thead>
@@ -287,7 +340,7 @@ export default function Expenses() {
                   </tr>
                 </thead>
                 <tbody>
-                  {expenses.length > 0 ? expenses.map(exp => (
+                  {expenses.length > 0 ? paginatedExpenses.map(exp => (
                     <tr key={exp.id}>
                       <td><span className="log-id">{exp.expense_id}</span></td>
                       <td>
@@ -323,6 +376,14 @@ export default function Expenses() {
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              total={expenses.length}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={goToPage}
+              itemLabel="expense"
+            />
+            </>
           )}
         </div>
       </div>

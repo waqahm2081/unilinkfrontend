@@ -1,18 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/dashboard.css';
 import '../styles/leads.css';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
+import PrintReportButton from '../components/PrintReportButton';
+import DateRangeFilter from '../components/DateRangeFilter';
+import ListPagination from '../components/ListPagination';
+import useListPagination from '../hooks/useListPagination';
+import { EMPTY_DATE_RANGE, hasDateRange, isDateInRange } from '../utils/dateRange';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faWallet, faPlus, faEdit, faTrash, faSearch, faFilePdf,
   faUniversity, faUser, faCheckCircle,
-  faChartBar, faBuilding, faTimes, faMoneyBillWave,
+  faBuilding, faTimes, faMoneyBillWave, faUserTie, faHandshake,
   faArrowUp, faArrowDown, faExclamationCircle,
-  faListCheck, faUserTie, faSave, faHandshake,
   faExchangeAlt, faMoneyBill, faToggleOn, faToggleOff,
-  faEye, faEyeSlash, faReceipt
+  faEye, faEyeSlash, faReceipt, faChevronDown
 } from '@fortawesome/free-solid-svg-icons';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
@@ -32,136 +36,6 @@ const TYPE_CONFIG = {
 
 const CURRENCY_FLAGS   = { PKR: '🇵🇰', USD: '🇺🇸', GBP: '🇬🇧', EUR: '🇪🇺' };
 const CURRENCY_SYMBOLS = { PKR: '₨', USD: '$', GBP: '£', EUR: '€' };
-
-// ─────────────────────────────────────────────
-// Sub-modal: Manage Default Services
-// ─────────────────────────────────────────────
-function DefaultServicesModal({ onClose }) {
-  const [services, setServices]   = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [editingId, setEditingId] = useState(null);
-  const [editName, setEditName]   = useState('');
-  const [newName, setNewName]     = useState('');
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState('');
-
-  const fetchServices = async () => {
-    setLoading(true);
-    try {
-      const res  = await fetch(`${API_URL}/finance/default-services`);
-      const data = await res.json();
-      if (data.success) setServices(data.services);
-    } catch { setError('Failed to load services'); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { fetchServices(); }, []);
-
-  const handleAdd = async () => {
-    if (!newName.trim()) return;
-    setSaving(true); setError('');
-    try {
-      const res  = await fetch(`${API_URL}/finance/default-services`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName: newName.trim() })
-      });
-      const data = await res.json();
-      if (data.success) { setNewName(''); fetchServices(); }
-      else setError(data.message);
-    } catch { setError('Failed to add service'); }
-    finally { setSaving(false); }
-  };
-
-  const handleEdit = async (id) => {
-    if (!editName.trim()) return;
-    setSaving(true); setError('');
-    try {
-      const res  = await fetch(`${API_URL}/finance/default-services/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName: editName.trim() })
-      });
-      const data = await res.json();
-      if (data.success) { setEditingId(null); setEditName(''); fetchServices(); }
-      else setError(data.message);
-    } catch { setError('Failed to update service'); }
-    finally { setSaving(false); }
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this service?')) return;
-    try {
-      const res  = await fetch(`${API_URL}/finance/default-services/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) fetchServices();
-      else setError(data.message);
-    } catch { setError('Failed to delete service'); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
-        <div className="modal-header">
-          <h2><FontAwesomeIcon icon={faListCheck} style={{ marginRight: '10px', color: '#F47B20' }} />Default Invoice Services</h2>
-          <button className="modal-close" onClick={onClose}><FontAwesomeIcon icon={faTimes} /></button>
-        </div>
-        <div className="modal-body">
-          <p style={{ color: '#666', fontSize: '13px', marginBottom: '16px' }}>
-            These services can be selectively included on <strong>Student</strong> invoices at no charge.
-          </p>
-          {error && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px' }}>{error}</div>}
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '24px', color: '#888' }}>Loading...</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-              {services.map(svc => (
-                <div key={svc.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#f9f9f9', borderRadius: '8px', padding: '10px 14px', border: '1px solid #e5e7eb' }}>
-                  {editingId === svc.id ? (
-                    <>
-                      <input className="input-field" value={editName} onChange={e => setEditName(e.target.value)} style={{ flex: 1, margin: 0 }} autoFocus
-                        onKeyDown={e => { if (e.key === 'Enter') handleEdit(svc.id); if (e.key === 'Escape') setEditingId(null); }} />
-                      <button onClick={() => handleEdit(svc.id)} disabled={saving} style={{ background: '#4CAF50', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px' }}>
-                        <FontAwesomeIcon icon={faSave} />
-                      </button>
-                      <button onClick={() => setEditingId(null)} style={{ background: '#e5e7eb', color: '#555', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
-                        <FontAwesomeIcon icon={faTimes} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ flex: 1, fontSize: '13px', color: '#333' }}>✓ {svc.service_name}</span>
-                      <button onClick={() => { setEditingId(svc.id); setEditName(svc.service_name); }} style={{ background: '#e3f2fd', color: '#1565c0', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
-                        <FontAwesomeIcon icon={faEdit} />
-                      </button>
-                      <button onClick={() => handleDelete(svc.id)} style={{ background: '#ffebee', color: '#c62828', border: 'none', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>
-                        <FontAwesomeIcon icon={faTrash} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-              {services.length === 0 && <div style={{ textAlign: 'center', padding: '20px', color: '#aaa', fontSize: '13px' }}>No services yet</div>}
-            </div>
-          )}
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#333', display: 'block', marginBottom: '8px' }}>Add New Service</label>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <input className="input-field" placeholder="e.g. SOP Review & Guidance" value={newName}
-                onChange={e => setNewName(e.target.value)} style={{ flex: 1, margin: 0 }}
-                onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }} />
-              <button onClick={handleAdd} disabled={saving || !newName.trim()}
-                style={{ background: '#F47B20', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 18px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', whiteSpace: 'nowrap' }}>
-                <FontAwesomeIcon icon={faPlus} /> Add
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────
 // Sub-modal: Manage Agents
@@ -312,6 +186,19 @@ function AgentsModal({ onClose }) {
 // Sub-modal: Edit Invoice
 // ─────────────────────────────────────────────
 function EditInvoiceModal({ invoice, bankAccounts, onClose, onSaved }) {
+  const navigate = useNavigate();
+  const isStudent = invoice.invoice_type === 'Student';
+  const isManualStudent = invoice.is_manual_student === 1 || invoice.is_manual_student === true;
+  const initialContactName = isStudent
+    ? (isManualStudent ? (invoice.manual_student_name || invoice.student_name || '') : (invoice.student_name || ''))
+    : (invoice.invoice_type === 'Agent Commission' ? (invoice.agent_name || '') : '');
+  const initialContactEmail = isStudent
+    ? (isManualStudent ? (invoice.manual_student_email || invoice.student_email || '') : (invoice.student_email || ''))
+    : (invoice.agent_email || '');
+  const initialContactPhone = isStudent
+    ? (isManualStudent ? (invoice.manual_student_mobile || invoice.student_mobile || '') : (invoice.student_mobile || ''))
+    : (invoice.agent_phone || '');
+
   const [form, setForm] = useState({
     invoiceDate:            invoice.invoice_date?.slice(0, 10) || '',
     dueDate:                invoice.due_date?.slice(0, 10) || '',
@@ -324,14 +211,27 @@ function EditInvoiceModal({ invoice, bankAccounts, onClose, onSaved }) {
     agentCommissionPercent: invoice.agent_commission_percent || '',
     notes:                  invoice.notes || '',
     paymentStatus:          invoice.payment_status || 'Pending',
-    paidAmount:             invoice.paid_amount || '',
-    paymentDate:            invoice.payment_date?.slice(0, 10) || '',
+    contactName:            initialContactName,
+    contactEmail:           initialContactEmail,
+    contactPhone:           initialContactPhone,
   });
+  const [payments, setPayments] = useState(invoice.payments || []);
   const [showConvertedCurrency, setShowConvertedCurrency] = useState(
     invoice.show_converted_currency !== 0 && invoice.show_converted_currency !== false
   );
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
+
+  useEffect(() => {
+    if (invoice.payments?.length) {
+      setPayments(invoice.payments);
+      return;
+    }
+    fetch(`${API_URL}/finance/invoices/${invoice.id}/payments`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setPayments(d.payments || []); })
+      .catch(() => {});
+  }, [invoice.id, invoice.payments]);
 
   const isCash     = invoice.payment_method === 'cash';
   const hasForeign = invoice.selected_currency && invoice.selected_currency !== 'PKR';
@@ -357,6 +257,19 @@ function EditInvoiceModal({ invoice, bankAccounts, onClose, onSaved }) {
         agentCommissionAmount,
         showConvertedCurrency,
       };
+      delete payload.contactName;
+      delete payload.contactEmail;
+      delete payload.contactPhone;
+
+      if (isStudent) {
+        payload.studentName = form.contactName;
+        payload.studentEmail = form.contactEmail;
+        payload.studentMobile = form.contactPhone;
+      } else if (isAgent) {
+        payload.agentName = form.contactName;
+        payload.agentEmail = form.contactEmail;
+        payload.agentPhone = form.contactPhone;
+      }
       const res  = await fetch(`${API_URL}/finance/invoices/${invoice.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
@@ -388,6 +301,47 @@ function EditInvoiceModal({ invoice, bankAccounts, onClose, onSaved }) {
               <FontAwesomeIcon icon={faExchangeAlt} />
               This invoice was created in <strong>{invoice.selected_currency}</strong>
               (rate: 1 {invoice.selected_currency} = PKR {parseFloat(invoice.exchange_rate || 0).toLocaleString()}).
+            </div>
+          )}
+
+          {(isStudent || isAgent) && (
+            <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #e5e7eb' }}>
+              <div style={{ fontWeight: 700, fontSize: '13px', color: '#444', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Contact Information
+              </div>
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>{isAgent ? 'Agent Name' : 'Name'}</label>
+                  <input
+                    className="input-field"
+                    value={form.contactName}
+                    onChange={e => setForm({ ...form, contactName: e.target.value })}
+                    placeholder={isAgent ? 'Agent name' : 'Student / client name'}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      className="input-field"
+                      value={form.contactEmail}
+                      onChange={e => setForm({ ...form, contactEmail: e.target.value })}
+                      placeholder="Email address"
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Phone Number</label>
+                    <input
+                      type="tel"
+                      className="input-field"
+                      value={form.contactPhone}
+                      onChange={e => setForm({ ...form, contactPhone: e.target.value })}
+                      placeholder="Phone number"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -481,26 +435,39 @@ function EditInvoiceModal({ invoice, bankAccounts, onClose, onSaved }) {
           </div>
 
           <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e5e7eb' }}>
-            <div style={{ fontWeight: 700, fontSize: '13px', color: '#444', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Payment Status</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label>Status</label>
-                <select className="input-field" value={form.paymentStatus} onChange={e => setForm({ ...form, paymentStatus: e.target.value })}>
-                  <option value="Pending">Pending</option>
-                  <option value="Paid">Paid</option>
-                  <option value="Partially Paid">Partially Paid</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label>Amount Paid (PKR)</label>
-                <input type="number" className="input-field" value={form.paidAmount} onChange={e => setForm({ ...form, paidAmount: e.target.value })} min="0" step="0.01" />
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label>Payment Date</label>
-                <input type="date" className="input-field" value={form.paymentDate} onChange={e => setForm({ ...form, paymentDate: e.target.value })} />
+            <div style={{ fontWeight: 700, fontSize: '13px', color: '#444', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Payment</div>
+            <div className="form-group" style={{ margin: '0 0 12px' }}>
+              <label>Status</label>
+              <select className="input-field" value={form.paymentStatus} onChange={e => setForm({ ...form, paymentStatus: e.target.value })}>
+                <option value="Pending">Pending</option>
+                <option value="Paid">Paid</option>
+                <option value="Partially Paid">Partially Paid</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+              <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                Total paid: PKR {parseFloat(invoice.paid_amount || 0).toLocaleString()} — use Update Payment to record installments.
               </div>
             </div>
+            {payments.length > 0 && (
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                {payments.map((p, idx) => (
+                  <div key={p.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '8px 12px', borderBottom: idx < payments.length - 1 ? '1px solid #f0f0f0' : 'none',
+                    fontSize: '12px'
+                  }}>
+                    <span>#{idx + 1} — {p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong style={{ color: '#2E7D32' }}>PKR {parseFloat(p.amount || 0).toLocaleString()}</strong>
+                      <button type="button" onClick={() => navigate(`/payment-receipt/${invoice.id}/${p.id}`)}
+                        style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '6px', padding: '4px 6px', cursor: 'pointer' }}>
+                        <FontAwesomeIcon icon={faReceipt} />
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="form-group" style={{ marginTop: '16px', marginBottom: 0 }}>
@@ -529,11 +496,16 @@ export default function Finance() {
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState('');
 
-  const [typeFilter, setTypeFilter]     = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
   const [searchTerm, setSearchTerm]     = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear]   = useState(new Date().getFullYear());
+  const [dateRange, setDateRange]       = useState(EMPTY_DATE_RANGE);
+  const [activeFilter, setActiveFilter] = useState(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const [columnFilters, setColumnFilters] = useState({
+    type: [], status: [], paymentVia: []
+  });
+  const [filterSearch, setFilterSearch] = useState({
+    type: '', status: '', paymentVia: ''
+  });
 
   const [showDeleteModal, setShowDeleteModal]   = useState(false);
   const [invoiceToDelete, setInvoiceToDelete]   = useState(null);
@@ -541,44 +513,39 @@ export default function Finance() {
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentInvoice, setPaymentInvoice]     = useState(null);
-  const [paymentForm, setPaymentForm]           = useState({ paymentStatus: '', paidAmount: '', paymentDate: '' });
+  const [paymentHistory, setPaymentHistory]     = useState([]);
+  const [paymentForm, setPaymentForm]           = useState({
+    paymentStatus: '', installmentAmount: '', paymentDate: ''
+  });
   const [updatingPayment, setUpdatingPayment]   = useState(false);
+  const [receiptPicker, setReceiptPicker]       = useState(null); // { invoice, payments }
 
-  const [showDefaultServicesModal, setShowDefaultServicesModal] = useState(false);
   const [showAgentsModal, setShowAgentsModal] = useState(false);
   const [editInvoice, setEditInvoice]         = useState(null);
-
-  const months = [
-    { value: 1, label: 'January' }, { value: 2, label: 'February' },
-    { value: 3, label: 'March' },   { value: 4, label: 'April' },
-    { value: 5, label: 'May' },     { value: 6, label: 'June' },
-    { value: 7, label: 'July' },    { value: 8, label: 'August' },
-    { value: 9, label: 'September' },{ value: 10, label: 'October' },
-    { value: 11, label: 'November' },{ value: 12, label: 'December' },
-  ];
-  const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
     try {
-      let url = `${API_URL}/finance/invoices?`;
-      if (typeFilter)   url += `type=${encodeURIComponent(typeFilter)}&`;
-      if (statusFilter) url += `status=${encodeURIComponent(statusFilter)}&`;
-      url += `month=${selectedMonth}&year=${selectedYear}`;
-      const res  = await fetch(url);
+      const res  = await fetch(`${API_URL}/finance/invoices`);
       const data = await res.json();
       if (data.success) setInvoices(data.invoices);
     } catch { setError('Failed to fetch invoices'); }
     finally { setLoading(false); }
-  }, [typeFilter, statusFilter, selectedMonth, selectedYear]);
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
-      const res  = await fetch(`${API_URL}/finance/statistics?month=${selectedMonth}&year=${selectedYear}`);
+      const params = new URLSearchParams();
+      if (hasDateRange(dateRange)) {
+        if (dateRange.from) params.append('dateFrom', dateRange.from);
+        if (dateRange.to) params.append('dateTo', dateRange.to);
+      }
+      const qs = params.toString();
+      const res  = await fetch(`${API_URL}/finance/statistics${qs ? `?${qs}` : ''}`);
       const data = await res.json();
       if (data.success) { setStatistics(data.statistics); setBankStats(data.bankStats); }
     } catch { console.error('Stats error'); }
-  }, [selectedMonth, selectedYear]);
+  }, [dateRange]);
 
   const fetchBankAccounts = async () => {
     try {
@@ -590,23 +557,174 @@ export default function Finance() {
 
   useEffect(() => {
     fetchInvoices();
-    fetchStats();
     fetchBankAccounts();
-  }, [fetchInvoices, fetchStats]);
+  }, [fetchInvoices]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.filter-dropdown-container')) {
+        setActiveFilter(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const getPaymentVia = (inv) => {
+    if (inv.payment_method === 'cash') return 'Cash';
+    return inv.account_name || '-';
+  };
+
+  const getUniqueValues = (column) => {
+    const values = new Set();
+    invoices.forEach(inv => {
+      let value;
+      if (column === 'type') value = inv.invoice_type;
+      else if (column === 'status') value = inv.payment_status;
+      else if (column === 'paymentVia') value = getPaymentVia(inv);
+      if (value) values.add(value);
+    });
+    return Array.from(values).sort();
+  };
+
+  const getFilteredOptions = (column) => {
+    const unique = getUniqueValues(column);
+    const term = (filterSearch[column] || '').toLowerCase();
+    return term ? unique.filter(v => v.toLowerCase().includes(term)) : unique;
+  };
+
+  const toggleFilterValue = (column, value) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: prev[column].includes(value)
+        ? prev[column].filter(v => v !== value)
+        : [...prev[column], value]
+    }));
+  };
+
+  const clearColumnFilter = (column) => {
+    setColumnFilters(prev => ({ ...prev, [column]: [] }));
+    setFilterSearch(prev => ({ ...prev, [column]: '' }));
+  };
+
+  const clearAllFilters = () => {
+    setColumnFilters({ type: [], status: [], paymentVia: [] });
+    setFilterSearch({ type: '', status: '', paymentVia: '' });
+    setSearchTerm('');
+    setDateRange(EMPTY_DATE_RANGE);
+  };
 
   const filteredInvoices = invoices.filter(inv => {
-    if (!searchTerm) return true;
-    const s = searchTerm.toLowerCase();
-    return (
-      inv.invoice_id?.toLowerCase().includes(s) ||
-      inv.student_name?.toLowerCase().includes(s) ||
-      inv.manual_student_name?.toLowerCase().includes(s) ||
-      inv.student_ref_id?.toLowerCase().includes(s) ||
-      inv.university_name?.toLowerCase().includes(s) ||
-      inv.account_name?.toLowerCase().includes(s) ||
-      inv.agent_name?.toLowerCase().includes(s)
-    );
+    if (searchTerm.trim()) {
+      const s = searchTerm.toLowerCase();
+      const matchesSearch = (
+        inv.invoice_id?.toLowerCase().includes(s) ||
+        inv.student_name?.toLowerCase().includes(s) ||
+        inv.manual_student_name?.toLowerCase().includes(s) ||
+        inv.student_ref_id?.toLowerCase().includes(s) ||
+        inv.university_name?.toLowerCase().includes(s) ||
+        inv.account_name?.toLowerCase().includes(s) ||
+        inv.agent_name?.toLowerCase().includes(s)
+      );
+      if (!matchesSearch) return false;
+    }
+    if (columnFilters.type.length > 0 && !columnFilters.type.includes(inv.invoice_type)) return false;
+    if (columnFilters.status.length > 0 && !columnFilters.status.includes(inv.payment_status)) return false;
+    if (columnFilters.paymentVia.length > 0 && !columnFilters.paymentVia.includes(getPaymentVia(inv))) return false;
+    if (hasDateRange(dateRange) && !isDateInRange(inv.invoice_date, dateRange.from, dateRange.to)) return false;
+    return true;
   });
+
+  const { paginatedItems: paginatedInvoices, totalPages, currentPage, goToPage } = useListPagination(
+    filteredInvoices,
+    [searchTerm, JSON.stringify(columnFilters), dateRange.from, dateRange.to].join('|')
+  );
+
+  const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || hasDateRange(dateRange);
+
+  const FilterDropdown = ({ column, label }) => {
+    const triggerRef = useRef(null);
+    const isActive = activeFilter === column;
+    const hasFilters = columnFilters[column].length > 0;
+    const filteredOptions = getFilteredOptions(column);
+    const allOptions = getUniqueValues(column);
+
+    const handleToggle = () => {
+      if (isActive) { setActiveFilter(null); return; }
+      const rect = triggerRef.current.getBoundingClientRect();
+      const dropdownHeight = 380;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      let top = (spaceBelow >= dropdownHeight || spaceBelow > spaceAbove)
+        ? rect.bottom + 8
+        : rect.top - dropdownHeight - 8;
+      let left = rect.left;
+      if (left + 280 > window.innerWidth) left = window.innerWidth - 300;
+      setDropdownPosition({ top, left });
+      setActiveFilter(column);
+    };
+
+    return (
+      <div className="filter-dropdown-container">
+        <button
+          ref={triggerRef}
+          className={`filter-trigger ${hasFilters ? 'has-filters' : ''}`}
+          onClick={handleToggle}
+        >
+          {label}
+          <FontAwesomeIcon icon={faChevronDown} className="filter-icon" />
+          {hasFilters && <span className="filter-count">{columnFilters[column].length}</span>}
+        </button>
+        {isActive && (
+          <div className="filter-dropdown" style={{ top: `${dropdownPosition.top}px`, left: `${dropdownPosition.left}px` }}>
+            <div className="filter-dropdown-header">
+              <input
+                type="text"
+                className="filter-search-input"
+                placeholder="Search..."
+                value={filterSearch[column]}
+                onChange={(e) => setFilterSearch(prev => ({ ...prev, [column]: e.target.value }))}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+            <div className="filter-options">
+              <label className="filter-option select-all">
+                <input
+                  type="checkbox"
+                  checked={columnFilters[column].length === allOptions.length && allOptions.length > 0}
+                  onChange={(e) => {
+                    if (e.target.checked) setColumnFilters(prev => ({ ...prev, [column]: allOptions }));
+                    else clearColumnFilter(column);
+                  }}
+                />
+                <span className="filter-label">Select All</span>
+              </label>
+              {filteredOptions.length > 0 ? filteredOptions.map((value, i) => (
+                <label key={i} className="filter-option">
+                  <input
+                    type="checkbox"
+                    checked={columnFilters[column].includes(value)}
+                    onChange={() => toggleFilterValue(column, value)}
+                  />
+                  <span className="filter-label">{value}</span>
+                </label>
+              )) : (
+                <div className="no-results">No results found</div>
+              )}
+            </div>
+            <div className="filter-dropdown-footer">
+              <button className="btn-clear-filter" onClick={() => clearColumnFilter(column)}>Clear</button>
+              <button className="btn-apply-filter" onClick={() => setActiveFilter(null)}>Apply</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const handleDelete = async () => {
     if (!invoiceToDelete) return;
@@ -620,34 +738,154 @@ export default function Finance() {
     finally { setDeleting(false); }
   };
 
-  const openPaymentModal = (inv) => {
+  const loadPaymentHistory = async (invoiceId) => {
+    try {
+      const res = await fetch(`${API_URL}/finance/invoices/${invoiceId}/payments`);
+      const data = await res.json();
+      if (data.success) {
+        setPaymentHistory(data.payments || []);
+        return data.payments || [];
+      }
+    } catch { /* ignore */ }
+    setPaymentHistory([]);
+    return [];
+  };
+
+  const openPaymentModal = async (inv) => {
     setPaymentInvoice(inv);
     setPaymentForm({
       paymentStatus: inv.payment_status,
-      paidAmount:    inv.paid_amount || '',
-      paymentDate:   inv.payment_date ? inv.payment_date.slice(0, 10) : ''
+      installmentAmount: '',
+      paymentDate: new Date().toISOString().slice(0, 10)
     });
     setShowPaymentModal(true);
+    const payments = inv.payments?.length ? inv.payments : await loadPaymentHistory(inv.id);
+    setPaymentHistory(payments || []);
+  };
+
+  const openReceiptForInvoice = async (inv) => {
+    let payments = Array.isArray(inv.payments) ? inv.payments : null;
+    if (!payments) {
+      try {
+        const res = await fetch(`${API_URL}/finance/invoices/${inv.id}/payments`);
+        const data = await res.json();
+        payments = data.success ? (data.payments || []) : [];
+      } catch {
+        payments = [];
+      }
+    }
+
+    if (payments.length > 1) {
+      setReceiptPicker({ invoice: inv, payments });
+      return;
+    }
+    if (payments.length === 1) {
+      navigate(`/payment-receipt/${inv.id}/${payments[0].id}`);
+      return;
+    }
+    // Fallback for paid invoices without history rows yet
+    navigate(`/payment-receipt/${inv.id}`);
   };
 
   const handleUpdatePayment = async () => {
     if (!paymentInvoice) return;
+    const amount = parseFloat(paymentForm.installmentAmount);
+    const hasInstallment = isFinite(amount) && amount > 0;
+
+    if (hasInstallment && !paymentForm.paymentDate) {
+      setError('Payment date is required for a new installment');
+      return;
+    }
+
     setUpdatingPayment(true);
+    setError('');
     try {
-      const res  = await fetch(`${API_URL}/finance/invoices/${paymentInvoice.id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(paymentForm)
-      });
-      const data = await res.json();
-      if (data.success) { setShowPaymentModal(false); setPaymentInvoice(null); fetchInvoices(); fetchStats(); }
-      else setError(data.message);
+      if (hasInstallment) {
+        const res = await fetch(`${API_URL}/finance/invoices/${paymentInvoice.id}/payments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount,
+            paymentDate: paymentForm.paymentDate,
+            paymentStatus: paymentForm.paymentStatus
+          })
+        });
+        const data = await res.json();
+        if (!data.success) { setError(data.message); return; }
+        setPaymentHistory(data.payments || []);
+        setPaymentForm(prev => ({
+          ...prev,
+          installmentAmount: '',
+          paymentStatus: data.paymentStatus || prev.paymentStatus,
+          paymentDate: new Date().toISOString().slice(0, 10)
+        }));
+        setPaymentInvoice(prev => prev ? {
+          ...prev,
+          paid_amount: data.paidAmount,
+          payment_status: data.paymentStatus,
+          payments: data.payments
+        } : prev);
+        fetchInvoices();
+        fetchStats();
+      } else {
+        // Status-only update (e.g. Cancelled)
+        const res = await fetch(`${API_URL}/finance/invoices/${paymentInvoice.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentStatus: paymentForm.paymentStatus })
+        });
+        const data = await res.json();
+        if (!data.success) { setError(data.message); return; }
+        setShowPaymentModal(false);
+        setPaymentInvoice(null);
+        fetchInvoices();
+        fetchStats();
+      }
     } catch { setError('Failed to update payment'); }
     finally { setUpdatingPayment(false); }
   };
+
+  const canViewReceipt = (inv) =>
+    ['Paid', 'Partially Paid'].includes(inv.payment_status) && parseFloat(inv.paid_amount) > 0;
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
+
+  const getBilledToDisplay = (inv) => {
+    if (inv.invoice_type === 'Student') {
+      const name = inv.manual_student_name || inv.student_name || '-';
+      const ref = inv.manual_student_name ? '' : (inv.student_ref_id || '');
+      return ref ? `${name} (${ref})` : name;
+    }
+    if (inv.invoice_type === 'Agent Commission') {
+      return `${inv.agent_name || '-'} (${inv.agent_commission_percent || 0}% commission)`;
+    }
+    return inv.university_name || '-';
+  };
+
+  const getInvoiceTypeDisplay = (inv) => {
+    if (inv.invoice_type === 'University Commission') return 'Uni. Commission';
+    if (inv.invoice_type === 'Agent Commission') return 'Agent Comm.';
+    return 'Student';
+  };
+
+  const printColumns = [
+    { header: 'Invoice ID', value: (r) => r.invoice_id },
+    { header: 'Type', value: (r) => getInvoiceTypeDisplay(r) },
+    { header: 'Date', value: (r) => formatDate(r.invoice_date) },
+    { header: 'Billed To / Agent', value: (r) => getBilledToDisplay(r) },
+    {
+      header: 'Payment Via',
+      value: (r) => (r.payment_method === 'cash' ? 'Cash' : `${r.account_name || '-'}${r.bank_name ? ` (${r.bank_name})` : ''}`),
+    },
+    {
+      header: 'Amount (PKR)',
+      value: (r) => parseFloat(r.final_amount || 0).toLocaleString('en-PK', { minimumFractionDigits: 2 }),
+    },
+    { header: 'Status', value: (r) => r.payment_status },
+  ];
 
   return (
     <>
@@ -661,9 +899,17 @@ export default function Finance() {
               <h1><FontAwesomeIcon icon={faWallet} className="page-icon" />Finance & Invoices</h1>
             </div>
             <div className="header-right" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button className="btn-secondary" onClick={() => setShowDefaultServicesModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
-                <FontAwesomeIcon icon={faListCheck} /> Manage Services
-              </button>
+              <PrintReportButton
+                show={hasActiveFilters}
+                title="Finance & Invoices"
+                columns={printColumns}
+                rows={filteredInvoices}
+              />
+              {hasActiveFilters && (
+                <button className="btn-clear-all-filters" onClick={clearAllFilters}>
+                  <FontAwesomeIcon icon={faTimes} /> Clear All Filters
+                </button>
+              )}
               <button className="btn-secondary" onClick={() => setShowAgentsModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
                 <FontAwesomeIcon icon={faUserTie} /> Agents
               </button>
@@ -674,18 +920,6 @@ export default function Finance() {
                 <FontAwesomeIcon icon={faPlus} /> New Invoice
               </button>
             </div>
-          </div>
-
-          {/* Month/Year Selector */}
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', alignItems: 'center' }}>
-            <FontAwesomeIcon icon={faChartBar} style={{ color: '#F47B20' }} />
-            <span style={{ fontWeight: 600, color: '#333' }}>Stats for:</span>
-            <select className="input-field" style={{ width: '150px' }} value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))}>
-              {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-            <select className="input-field" style={{ width: '100px' }} value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))}>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
           </div>
 
           {/* Stats */}
@@ -762,52 +996,50 @@ export default function Finance() {
 
           {error && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px' }}>{error}</div>}
 
-          {/* Filters */}
-          <div className="leads-filters">
-            <div className="search-box">
-              <FontAwesomeIcon icon={faSearch} className="search-icon" />
-              <input type="text" className="input-field" placeholder="Search by invoice ID, student, university, agent..."
-                value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+          <div className="page-toolbar">
+            <div className="page-search">
+              <FontAwesomeIcon icon={faSearch} className="page-search-icon" />
+              <input
+                type="text"
+                className="page-search-input"
+                placeholder="Search by invoice ID, student, university, agent..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <button type="button" className="page-search-clear" onClick={() => setSearchTerm('')}>
+                  <FontAwesomeIcon icon={faTimes} />
+                </button>
+              )}
             </div>
-            <div className="filter-group">
-              <select className="input-field" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-                <option value="">All Types</option>
-                <option value="Student">Student Invoice</option>
-                <option value="University Commission">University Commission</option>
-                <option value="Agent Commission">Agent Commission</option>
-              </select>
-            </div>
-            <div className="filter-group">
-              <select className="input-field" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-                <option value="">All Statuses</option>
-                <option value="Pending">Pending</option>
-                <option value="Paid">Paid</option>
-                <option value="Partially Paid">Partially Paid</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
-            </div>
+            <DateRangeFilter
+              label="Invoice Date"
+              value={dateRange}
+              onChange={setDateRange}
+            />
           </div>
 
           {/* Table */}
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>Loading invoices...</div>
           ) : (
+            <>
             <div className="leads-table-container">
               <table className="leads-table">
                 <thead>
                   <tr>
                     <th>Invoice ID</th>
-                    <th>Type</th>
+                    <th><FilterDropdown column="type" label="Type" /></th>
                     <th>Date</th>
                     <th>Billed To / Agent</th>
-                    <th>Payment Via</th>
+                    <th><FilterDropdown column="paymentVia" label="Payment Via" /></th>
                     <th>Amount (PKR)</th>
-                    <th>Status</th>
+                    <th><FilterDropdown column="status" label="Status" /></th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredInvoices.length > 0 ? filteredInvoices.map(inv => {
+                  {filteredInvoices.length > 0 ? paginatedInvoices.map(inv => {
                     const typeConf = TYPE_CONFIG[inv.invoice_type] || TYPE_CONFIG['Student'];
                     const hasForeignCurrency = inv.selected_currency && inv.selected_currency !== 'PKR';
                     const isCash = inv.payment_method === 'cash';
@@ -924,8 +1156,8 @@ export default function Finance() {
                             <button title="View PDF" style={{ background: '#fce4ec', color: '#c62828', border: 'none', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer' }} onClick={() => navigate(`/invoice-pdf/${inv.id}`)}>
                               <FontAwesomeIcon icon={faFilePdf} />
                             </button>
-                            {inv.payment_status === 'Partially Paid' && (
-                              <button title="Download Receipt" style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer' }} onClick={() => navigate(`/payment-receipt/${inv.id}`)}>
+                            {canViewReceipt(inv) && (
+                              <button title="View Receipt" style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '6px', padding: '6px 8px', cursor: 'pointer' }} onClick={() => openReceiptForInvoice(inv)}>
                                 <FontAwesomeIcon icon={faReceipt} />
                               </button>
                             )}
@@ -938,17 +1170,26 @@ export default function Finance() {
                     );
                   }) : (
                     <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#888' }}>No invoices found</td>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
+                        {hasActiveFilters ? 'No invoices match the selected filters' : 'No invoices found'}
+                      </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              total={filteredInvoices.length}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={goToPage}
+              itemLabel="invoice"
+            />
+            </>
           )}
         </div>
       </div>
 
-      {showDefaultServicesModal && <DefaultServicesModal onClose={() => setShowDefaultServicesModal(false)} />}
       {showAgentsModal && <AgentsModal onClose={() => setShowAgentsModal(false)} />}
       {editInvoice && (
         <EditInvoiceModal
@@ -960,9 +1201,13 @@ export default function Finance() {
       )}
 
       {/* Update Payment Modal */}
-      {showPaymentModal && paymentInvoice && (
+      {showPaymentModal && paymentInvoice && (() => {
+        const finalAmt = parseFloat(paymentInvoice.final_amount) || 0;
+        const paidAmt = parseFloat(paymentInvoice.paid_amount) || 0;
+        const remaining = Math.max(0, finalAmt - paidAmt);
+        return (
         <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
             <div className="modal-header">
               <h2><FontAwesomeIcon icon={faMoneyBillWave} style={{ marginRight: '10px', color: '#4CAF50' }} />Update Payment</h2>
               <button className="modal-close" onClick={() => setShowPaymentModal(false)}><FontAwesomeIcon icon={faTimes} /></button>
@@ -970,7 +1215,18 @@ export default function Finance() {
             <div className="modal-body">
               <div style={{ background: '#f9f9f9', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600 }}>{paymentInvoice.invoice_id}</div>
-                <div style={{ color: '#666', fontSize: '13px' }}>Final Amount: <strong>PKR {parseFloat(paymentInvoice.final_amount).toLocaleString()}</strong></div>
+                <div style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>
+                  Final Amount: <strong>PKR {finalAmt.toLocaleString()}</strong>
+                </div>
+                <div style={{ display: 'flex', gap: '16px', marginTop: '6px', fontSize: '12px' }}>
+                  <span style={{ color: '#2E7D32' }}>Paid: <strong>PKR {paidAmt.toLocaleString()}</strong></span>
+                  <span style={{ color: remaining > 0 ? '#E65100' : '#2E7D32' }}>
+                    Remaining: <strong>PKR {remaining.toLocaleString()}</strong>
+                  </span>
+                  <span style={{ color: '#555' }}>
+                    Installments: <strong>{paymentHistory.length}</strong>
+                  </span>
+                </div>
                 {paymentInvoice.payment_method === 'cash' && (
                   <div style={{ color: '#2E7D32', fontSize: '12px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <FontAwesomeIcon icon={faMoneyBill} /> Cash Payment
@@ -982,6 +1238,46 @@ export default function Finance() {
                   </div>
                 )}
               </div>
+
+              {paymentHistory.length > 0 && (
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '12px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '8px' }}>
+                    Payment History
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                    {paymentHistory.map((p, idx) => (
+                      <div key={p.id} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 12px', borderBottom: idx < paymentHistory.length - 1 ? '1px solid #f0f0f0' : 'none',
+                        background: idx % 2 ? '#fafafa' : '#fff', gap: '10px'
+                      }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '13px' }}>
+                            Installment #{idx + 1}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#777' }}>
+                            {formatDate(p.payment_date)}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 700, color: '#2E7D32', fontSize: '13px' }}>
+                            PKR {parseFloat(p.amount || 0).toLocaleString()}
+                          </span>
+                          <button
+                            type="button"
+                            title="View Receipt"
+                            onClick={() => navigate(`/payment-receipt/${paymentInvoice.id}/${p.id}`)}
+                            style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '6px', padding: '5px 8px', cursor: 'pointer' }}
+                          >
+                            <FontAwesomeIcon icon={faReceipt} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="form-group">
                 <label>Payment Status</label>
                 <select className="input-field" value={paymentForm.paymentStatus} onChange={e => setPaymentForm({ ...paymentForm, paymentStatus: e.target.value })}>
@@ -990,10 +1286,21 @@ export default function Finance() {
                   <option value="Partially Paid">Partially Paid</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
+                <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                  Status auto-updates to Paid / Partially Paid based on installment totals (Cancelled can be set manually).
+                </div>
               </div>
               <div className="form-group">
-                <label>Amount Paid (PKR)</label>
-                <input type="number" className="input-field" placeholder="0.00" value={paymentForm.paidAmount} onChange={e => setPaymentForm({ ...paymentForm, paidAmount: e.target.value })} />
+                <label>This Installment Amount (PKR)</label>
+                <input
+                  type="number"
+                  className="input-field"
+                  placeholder="Enter amount for this payment"
+                  min="0"
+                  step="0.01"
+                  value={paymentForm.installmentAmount}
+                  onChange={e => setPaymentForm({ ...paymentForm, installmentAmount: e.target.value })}
+                />
               </div>
               <div className="form-group">
                 <label>Payment Date</label>
@@ -1001,20 +1308,69 @@ export default function Finance() {
               </div>
             </div>
             <div className="modal-footer" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {(paymentForm.paymentStatus === 'Partially Paid' || paymentInvoice.payment_status === 'Partially Paid') && (
+              {canViewReceipt(paymentInvoice) && (
                 <button
                   className="btn-secondary"
                   style={{ background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7' }}
-                  onClick={() => navigate(`/payment-receipt/${paymentInvoice.id}`)}
+                  onClick={() => openReceiptForInvoice({ ...paymentInvoice, payments: paymentHistory })}
                 >
                   <FontAwesomeIcon icon={faReceipt} style={{ marginRight: '6px' }} />
-                  Download Receipt
+                  View Receipt{paymentHistory.length > 1 ? 's' : ''}
                 </button>
               )}
-              <button className="btn-secondary" onClick={() => setShowPaymentModal(false)}>Cancel</button>
+              <button className="btn-secondary" onClick={() => setShowPaymentModal(false)}>Close</button>
               <button className="btn-primary" onClick={handleUpdatePayment} disabled={updatingPayment}>
-                {updatingPayment ? 'Saving...' : 'Update Payment'}
+                {updatingPayment
+                  ? 'Saving...'
+                  : (parseFloat(paymentForm.installmentAmount) > 0 ? 'Record Payment' : 'Update Status')}
               </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Receipt picker for multiple installments */}
+      {receiptPicker && (
+        <div className="modal-overlay" onClick={() => setReceiptPicker(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+            <div className="modal-header">
+              <h2><FontAwesomeIcon icon={faReceipt} style={{ marginRight: '10px', color: '#2e7d32' }} />Select Receipt</h2>
+              <button className="modal-close" onClick={() => setReceiptPicker(null)}><FontAwesomeIcon icon={faTimes} /></button>
+            </div>
+            <div className="modal-body">
+              <p style={{ margin: '0 0 12px', color: '#666', fontSize: '13px' }}>
+                This invoice has {receiptPicker.payments.length} installments. Choose which receipt to view.
+              </p>
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                {receiptPicker.payments.map((p, idx) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      const invId = receiptPicker.invoice.id;
+                      setReceiptPicker(null);
+                      navigate(`/payment-receipt/${invId}/${p.id}`);
+                    }}
+                    style={{
+                      width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '12px 14px', border: 'none', borderBottom: idx < receiptPicker.payments.length - 1 ? '1px solid #f0f0f0' : 'none',
+                      background: '#fff', cursor: 'pointer', textAlign: 'left'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '13px' }}>Installment #{idx + 1}</div>
+                      <div style={{ fontSize: '12px', color: '#777' }}>{formatDate(p.payment_date)}</div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: '#2E7D32' }}>
+                      PKR {parseFloat(p.amount || 0).toLocaleString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setReceiptPicker(null)}>Cancel</button>
             </div>
           </div>
         </div>

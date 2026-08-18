@@ -4,6 +4,7 @@ import '../styles/dashboard.css';
 import '../styles/leads.css';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
+import InvoiceDocument from '../components/InvoiceDocument';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faFileInvoiceDollar, faTimes, faPlus, faTrash,
@@ -360,15 +361,12 @@ export default function CreateInvoice() {
   const [gstPercent, setGstPercent] = useState('10');
   const [extraServices, setExtraServices] = useState([]);
 
-  // ── Default services ──
-  const [defaultServices, setDefaultServices]               = useState([]);
-  const [selectedDefaultServices, setSelectedDefaultServices] = useState([]);
-
   const [bankAccounts, setBankAccounts] = useState([]);
   const [students, setStudents]         = useState([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState('');
+  const [showPreview, setShowPreview] = useState(false);
 
   // ── Computed ──
   const base  = parseFloat(baseAmount) || 0;
@@ -428,7 +426,6 @@ export default function CreateInvoice() {
     fetchBankAccounts();
     fetchStudents();
     fetchAgents();
-    fetchDefaultServices();
     fetchCountries();
   }, []);
 
@@ -474,22 +471,6 @@ export default function CreateInvoice() {
       if (data.success) setAgents(data.agents.filter(a => a.status === 'Active'));
     } catch { console.error('agents err'); }
   };
-
-  const fetchDefaultServices = async () => {
-    try {
-      const res  = await fetch(`${API_URL}/finance/default-services`);
-      const data = await res.json();
-      if (data.success) {
-        setDefaultServices(data.services);
-        setSelectedDefaultServices(data.services.map(s => s.id));
-      }
-    } catch { console.error('default services err'); }
-  };
-
-  const toggleDefaultService = (id) =>
-    setSelectedDefaultServices(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
 
   // ── Student selection (Student invoice) ──
   const handleStudentSelect = (student) => {
@@ -651,37 +632,119 @@ export default function CreateInvoice() {
     setCommissionStudents([emptyCommissionEntry()]);
   };
 
-  const handleSubmit = async () => {
-    setError('');
-
-    if (!invoiceDate) { setError('Please fill in invoice date'); return; }
-    if (paymentMethod === 'bank' && !bankAccountId) { setError('Please select a bank account'); return; }
+  const getValidationError = () => {
+    if (!invoiceDate) return 'Please fill in invoice date';
+    if (paymentMethod === 'bank' && !bankAccountId) return 'Please select a bank account';
 
     if (isStudent) {
-      if (studentMode === 'db' && !selectedStudent) { setError('Please select a student'); return; }
-      if (studentMode === 'manual' && !manualStudent.name?.trim()) { setError('Please enter student name'); return; }
+      if (studentMode === 'db' && !selectedStudent) return 'Please select a student';
+      if (studentMode === 'manual' && !manualStudent.name?.trim()) return 'Please enter student name';
     }
     if (isCommission) {
       for (let i = 0; i < commissionStudents.length; i++) {
         const s = commissionStudents[i];
-        if (!s.universityName?.trim()) { setError(`Student ${i + 1}: University name is required`); return; }
-        if (!s.commissionAmount || parseFloat(s.commissionAmount) <= 0) { setError(`Student ${i + 1}: Commission amount is required`); return; }
-        if (!s.isManual && !s.studentId && !s.studentName) { setError(`Student ${i + 1}: Please select or enter a student`); return; }
-        if (s.isManual && !s.studentName?.trim()) { setError(`Student ${i + 1}: Please enter student name`); return; }
+        if (!s.universityName?.trim()) return `Student ${i + 1}: University name is required`;
+        if (!s.commissionAmount || parseFloat(s.commissionAmount) <= 0) return `Student ${i + 1}: Commission amount is required`;
+        if (!s.isManual && !s.studentId && !s.studentName) return `Student ${i + 1}: Please select or enter a student`;
+        if (s.isManual && !s.studentName?.trim()) return `Student ${i + 1}: Please enter student name`;
       }
     }
-    if (isAgent && !selectedAgentId) { setError('Please select an agent'); return; }
-    if (isAgent && !agentCommissionPercent) { setError('Please enter agent commission percentage'); return; }
+    if (isAgent && !selectedAgentId) return 'Please select an agent';
+    if (isAgent && !agentCommissionPercent) return 'Please enter agent commission percentage';
     if (selectedCurrency !== 'PKR' && (!exchangeRate || exchangeRate <= 0)) {
-      setError('Please enter a valid exchange rate'); return;
+      return 'Please enter a valid exchange rate';
     }
+    return '';
+  };
+
+  const canPreviewInvoice = !getValidationError();
+
+  const buildPreviewData = () => {
+    const bank = bankAccounts.find(b => b.id === parseInt(bankAccountId));
+    const agent = agents.find(a => a.id === parseInt(selectedAgentId));
+    const studentName = isStudent
+      ? (studentMode === 'db' && selectedStudent
+        ? [selectedStudent.name, selectedStudent.middle_name, selectedStudent.surname].filter(Boolean).join(' ')
+        : (manualStudent.name || ''))
+      : '';
+    const studentRef = isStudent && studentMode === 'db' && selectedStudent ? selectedStudent.student_id : null;
+    const studentEmail = isStudent
+      ? (studentMode === 'db' && selectedStudent ? (selectedStudent.email || '') : (manualStudent.email || ''))
+      : '';
+    const studentMobile = isStudent
+      ? (studentMode === 'db' && selectedStudent ? (selectedStudent.mobile || '') : (manualStudent.mobile || ''))
+      : '';
+
+    return {
+      invoice: {
+        invoice_id: 'DRAFT',
+        invoice_type: invoiceType,
+        invoice_date: invoiceDate,
+        due_date: dueDate || null,
+        payment_method: paymentMethod,
+        payment_status: 'Pending',
+        account_name: bank?.account_name || null,
+        bank_name: bank?.bank_name || null,
+        account_number: bank?.account_number || null,
+        iban: bank?.iban || null,
+        student_name: studentName || null,
+        student_ref_id: studentRef,
+        student_email: studentEmail || null,
+        student_mobile: studentMobile || null,
+        student_country: isStudent ? (getSelectedCountryNames().join(', ') || null) : null,
+        agent_name: agent?.agent_name || null,
+        agent_company: agent?.company_name || null,
+        selected_currency: selectedCurrency,
+        exchange_rate: isPKR ? 1 : exchangeRate,
+        show_converted_currency: !isPKR && showConvertedCurrency ? 1 : 0,
+        base_amount: base,
+        discount: disc,
+        gst_percent: isAgent ? 0 : gst,
+        gst_amount: isAgent ? 0 : gstAmount,
+        extra_services_total: extraServicesTotal,
+        final_amount: finalAmountPKR,
+        paid_amount: 0,
+        notes: notes || null,
+        agent_commission_amount: agentCommissionAmount,
+        agent_commission_percent: parseFloat(agentCommissionPercent) || 0,
+      },
+      extraServices: extraServices.filter(s => s.name).map(s => ({
+        service_name: s.name,
+        price: parseFloat(s.price) || 0,
+      })),
+      countryServices: selectedCountryServices.map(s => ({
+        id: s.id,
+        country_service_id: s.id,
+        service_name: s.service_name,
+        country_id: s.country_id,
+        country_name: s.country_name,
+        is_parent: s.is_parent ? 1 : 0,
+        parent_service_id: s.parent_service_id || null,
+        parent_service_name: s.parent_service_name || null,
+      })),
+      agentStudents: selectedAgentStudents.map(s => ({
+        student_name: s.student_name,
+        student_ref_id: s.student_ref_id || null,
+        is_manual: s.isManual,
+      })),
+      commissionStudents: commissionStudents.map(s => ({
+        student_name: s.studentName,
+        student_ref_id: s.studentRefId || null,
+        university_name: s.universityName,
+        commission_reference: s.commissionReference,
+        commission_amount: parseFloat(s.commissionAmount) || 0,
+      })),
+      payments: [],
+    };
+  };
+
+  const handleSubmit = async () => {
+    setError('');
+    const validationError = getValidationError();
+    if (validationError) { setError(validationError); return; }
 
     setSubmitting(true);
     try {
-      const chosenDefaultServices = defaultServices
-        .filter(s => selectedDefaultServices.includes(s.id))
-        .map(s => ({ id: s.id, service_name: s.service_name }));
-
       const payload = {
         invoiceType,
         invoiceDate,
@@ -743,7 +806,6 @@ export default function CreateInvoice() {
           parent_service_id: s.parent_service_id || null,
           parent_service_name: s.parent_service_name || null,
         })),
-        selectedDefaultServices: isStudent ? chosenDefaultServices : [],
         finalAmount:    finalAmountPKR,
         notes,
         selectedCurrency,
@@ -1434,37 +1496,6 @@ export default function CreateInvoice() {
                 )}
               </div>
 
-              {/* ── Default Services — Student only ── */}
-              {isStudent && defaultServices.length > 0 && (
-                <div style={sectionStyle}>
-                  <div style={sectionTitle}>
-                    <FontAwesomeIcon icon={faCheck} style={{ color: '#4CAF50' }} />
-                    Included by Default
-                    <span style={{ fontSize: '11px', fontWeight: 400, color: '#888', marginLeft: 'auto' }}>
-                      {selectedDefaultServices.length}/{defaultServices.length} selected
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '14px' }}>
-                    Select which default services to include on this invoice at no extra charge.
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {defaultServices.map(svc => {
-                      const checked = selectedDefaultServices.includes(svc.id);
-                      return (
-                        <label key={svc.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', padding: '10px 14px', borderRadius: '8px', background: checked ? '#E8F5E9' : '#fafafa', border: `1.5px solid ${checked ? '#A5D6A7' : '#e5e7eb'}`, transition: 'background 0.15s' }}>
-                          <div style={{ width: '20px', height: '20px', borderRadius: '5px', flexShrink: 0, border: `2px solid ${checked ? '#4CAF50' : '#bbb'}`, background: checked ? '#4CAF50' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
-                            {checked && <FontAwesomeIcon icon={faCheck} style={{ color: '#fff', fontSize: '10px' }} />}
-                          </div>
-                          <input type="checkbox" checked={checked} onChange={() => toggleDefaultService(svc.id)} style={{ display: 'none' }} />
-                          <span style={{ fontSize: '13px', color: checked ? '#1B5E20' : '#555', fontWeight: checked ? 600 : 400, flex: 1 }}>{svc.service_name}</span>
-                          {checked && <span style={{ fontSize: '11px', color: '#4CAF50', fontWeight: 600, background: '#C8E6C9', padding: '2px 8px', borderRadius: '10px' }}>Included</span>}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {/* ── Notes ── */}
               <div style={sectionStyle}>
                 <div className="form-group">
@@ -1549,17 +1580,6 @@ export default function CreateInvoice() {
                       {selectedAgentStudents.length > 0 && (
                         <span style={{ color: '#888', display: 'block', fontSize: '11px' }}>{selectedAgentStudents.length} student(s) linked</span>
                       )}
-                    </div>
-                  )}
-
-                  {isStudent && selectedDefaultServices.length > 0 && (
-                    <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid #f0f0f0' }}>
-                      <span style={{ color: '#666', display: 'block', marginBottom: '6px' }}>Default Services ({selectedDefaultServices.length})</span>
-                      {defaultServices.filter(s => selectedDefaultServices.includes(s.id)).map(s => (
-                        <span key={s.id} style={{ display: 'inline-block', background: '#E8F5E9', color: '#2E7D32', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', marginRight: '4px', marginBottom: '4px', fontWeight: 600 }}>
-                          {s.service_name}
-                        </span>
-                      ))}
                     </div>
                   )}
 
@@ -1655,6 +1675,23 @@ export default function CreateInvoice() {
                   <button className="btn-primary" onClick={handleSubmit} disabled={submitting} style={{ width: '100%', justifyContent: 'center' }}>
                     {submitting ? 'Creating Invoice...' : 'Create Invoice'}
                   </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => canPreviewInvoice && setShowPreview(true)}
+                    disabled={!canPreviewInvoice}
+                    title={canPreviewInvoice ? 'Preview invoice' : 'Fill all required fields to preview'}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      opacity: canPreviewInvoice ? 1 : 0.5,
+                      cursor: canPreviewInvoice ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faEye} /> Preview Invoice
+                  </button>
                   <button className="btn-secondary" onClick={() => navigate('/finance')} style={{ width: '100%', justifyContent: 'center' }}>
                     Cancel
                   </button>
@@ -1664,6 +1701,48 @@ export default function CreateInvoice() {
           </div>
         </div>
       </div>
+
+      {showPreview && (
+        <div
+          onClick={() => setShowPreview(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '24px 16px'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '860px',
+              maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.25)', overflow: 'hidden'
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', borderBottom: '1px solid #eee', flexShrink: 0
+            }}>
+              <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FontAwesomeIcon icon={faFileInvoiceDollar} style={{ color: '#F47B20' }} />
+                Invoice Preview
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                className="btn-icon"
+                title="Close"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px', color: '#666' }}
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, background: '#f5f5f5' }}>
+              <InvoiceDocument data={buildPreviewData()} preview />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

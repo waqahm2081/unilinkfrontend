@@ -283,7 +283,7 @@ root.render(
             }
           />
           <Route
-            path="/payment-receipt/:invoiceId"
+            path="/payment-receipt/:invoiceId/:paymentId?"
             element={
               <ProtectedRoute allowedRoles={['admin', 'consultant']}>
                 <PaymentReceipt />

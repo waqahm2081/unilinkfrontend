@@ -1643,6 +1643,150 @@ input, textarea, select {
     font-size: 0.875rem !important;
 }
 
+.lead-form-container .country-checkbox-item.read-only {
+    cursor: default;
+    pointer-events: none;
+}
+
+.lead-form-container .registration-form.follow-up-readonly .input-field,
+.lead-form-container .registration-form.follow-up-readonly input,
+.lead-form-container .registration-form.follow-up-readonly textarea,
+.lead-form-container .registration-form.follow-up-readonly select {
+    background: #f9fafb;
+    cursor: default;
+}
+
+.lead-form-container .registration-form.follow-up-readonly input[readonly],
+.lead-form-container .registration-form.follow-up-readonly textarea[readonly] {
+    color: #374151;
+}
+
+/* Lead Form - Purpose of Visit radios */
+.lead-form-container .purpose-radio-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fafafa;
+    text-align: left;
+}
+
+.lead-form-container .purpose-radio-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: #374151;
+    line-height: 1.35;
+}
+
+.lead-form-container .purpose-radio-item input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #f6730d;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin: 0;
+}
+
+.lead-form-container .purpose-radio-item.selected {
+    color: #111827;
+    font-weight: 500;
+}
+
+.lead-form-container .purpose-radio-item.purpose-other {
+    flex-wrap: wrap;
+}
+
+.lead-form-container .purpose-other-input {
+    flex: 1;
+    min-width: 160px;
+    padding: 6px 0 !important;
+    border: none !important;
+    border-bottom: 1px solid #9ca3af !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    font-size: 0.9rem !important;
+    outline: none;
+}
+
+.lead-form-container .purpose-other-input:focus {
+    border-bottom-color: #f6730d !important;
+}
+
+.lead-form-container .purpose-other-input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* Qualification detail boxes */
+.lead-form-container .qualification-prompt,
+.qualification-prompt {
+    font-size: 0.9rem;
+    color: #6b7280;
+    margin: 0 0 10px;
+    text-align: left;
+}
+
+.lead-form-container .qualification-levels-grid,
+.qualification-levels-grid {
+    margin-bottom: 16px;
+}
+
+.lead-form-container .qualification-detail-box,
+.qualification-detail-box {
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fff;
+    text-align: left;
+}
+
+.lead-form-container .qualification-detail-title,
+.qualification-detail-title {
+    margin: 0 0 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #f6730d;
+}
+
+.lead-form-container .qualification-header-subjects,
+.qualification-header-subjects {
+    grid-template-columns: 1.5fr 1fr 40px !important;
+}
+
+.lead-form-container .qualification-row-subjects,
+.qualification-row-subjects {
+    grid-template-columns: 1.5fr 1fr 40px !important;
+}
+
+.lead-form-container .qualification-simple-field,
+.qualification-simple-field {
+    max-width: 320px;
+}
+
+.lead-form-container .qualification-simple-field label,
+.qualification-simple-field label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 6px;
+}
+
+.lead-form-container .qualification-simple-field input,
+.qualification-simple-field input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
 /* Lead Form - Qualification Table */
 .lead-form-container .qualification-table,
 .lead-form-container .admission-tests-table {

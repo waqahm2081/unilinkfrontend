@@ -537,6 +537,18 @@ body {
     border-radius: 50%;
 }
 
+.table-name-link {
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.15s;
+}
+
+.table-name-link:hover {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
 .country-badge {
     display: inline-block;
     padding: 5px 12px;

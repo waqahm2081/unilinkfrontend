@@ -3,6 +3,7 @@ import '../styles/dashboard.css'
 import '../styles/logs.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import { ViewModeWrap } from '../components/ViewRecordModal'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -15,8 +16,9 @@ import {
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
-export default function EditLog() {
-    const { id } = useParams();
+export default function EditLog({ recordId, viewOnly = false } = {}) {
+    const { id: paramId } = useParams();
+    const id = recordId || paramId;
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -96,6 +98,7 @@ export default function EditLog() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (viewOnly) return;
         setSaving(true);
         setError('');
 
@@ -128,7 +131,7 @@ export default function EditLog() {
 
     if (loading) {
         return (
-            <>
+            <ViewModeWrap viewOnly={viewOnly}>
                 <Sidebar />
                 <div className="main-content" id="mainContent">
                     <Header />
@@ -136,12 +139,12 @@ export default function EditLog() {
                         <p>Loading visitor log...</p>
                     </div>
                 </div>
-            </>
+            </ViewModeWrap>
         );
     }
 
     return (
-        <>
+        <ViewModeWrap viewOnly={viewOnly}>
             <Sidebar />
 
             <div className="main-content" id="mainContent">
@@ -152,7 +155,7 @@ export default function EditLog() {
                         <div className="header-left">
                             <h1>
                                 <FontAwesomeIcon icon={faClipboardList} className="page-icon" />
-                                Edit Visitor Log
+                                {viewOnly ? 'Visitor Log Details' : 'Edit Visitor Log'}
                             </h1>
                         </div>
                         <div className="header-right">
@@ -470,6 +473,6 @@ export default function EditLog() {
                     </form>
                 </div>
             </div>
-        </>
+        </ViewModeWrap>
     )
 }

@@ -3,6 +3,13 @@ import '../styles/dashboard.css'
 import '../styles/leads.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import PrintReportButton from '../components/PrintReportButton'
+import DateRangeFilter from '../components/DateRangeFilter'
+import ViewRecordModal from '../components/ViewRecordModal'
+import EditLead from './EditLead'
+import ListPagination from '../components/ListPagination'
+import useListPagination from '../hooks/useListPagination'
+import { EMPTY_DATE_RANGE, hasDateRange, isDateInRange } from '../utils/dateRange'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -19,12 +26,14 @@ import {
   faExternalLinkAlt,
   faUserGraduate,
   faHistory,
+  faEye,
 } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
 export default function Leads() {
     const [leads, setLeads] = useState([]);
+    const [viewRecordId, setViewRecordId] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -35,23 +44,22 @@ export default function Leads() {
         phone: [],
         email: [],
         countries: [],
-        course: [],
-        qualification: [],
-        date: []
+        institute: [],
+        qualification: []
     });
     const [filterSearch, setFilterSearch] = useState({
         fullName: '',
         phone: '',
         email: '',
         countries: '',
-        course: '',
-        qualification: '',
-        date: ''
+        institute: '',
+        qualification: ''
     });
     // NEW: tracks which stat card is active ('new' | 'assigned' | null)
     const [statFilter, setStatFilter] = useState(null);
     const [recordView, setRecordView] = useState('active');
     const [registeredCount, setRegisteredCount] = useState(0);
+    const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
 
     useEffect(() => {
         fetchLeads();
@@ -112,6 +120,27 @@ export default function Leads() {
         return arr.length > 0 ? arr.join(', ') : '-';
     };
 
+    const parseQualificationLevels = (lead) => {
+        if (lead.qualifications) {
+            try {
+                const parsed = typeof lead.qualifications === 'string'
+                    ? JSON.parse(lead.qualifications)
+                    : lead.qualifications;
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed
+                        .map(q => q.level || q.qualification)
+                        .filter(Boolean);
+                }
+            } catch { /* fall through */ }
+        }
+        return lead.qualification ? [lead.qualification] : [];
+    };
+
+    const parseQualificationsDisplay = (lead) => {
+        const levels = parseQualificationLevels(lead);
+        return levels.length > 0 ? levels.join(', ') : '-';
+    };
+
     // ── Unique values per column ───────────────────────────────────────────────
     const getUniqueValues = (column) => {
         const values = new Set();
@@ -120,19 +149,15 @@ export default function Leads() {
                 // Each country is a SEPARATE option
                 const arr = parseCountriesArray(lead.countries_of_interest);
                 arr.forEach(c => values.add(c));
+            } else if (column === 'qualification') {
+                parseQualificationLevels(lead).forEach(q => values.add(q));
             } else {
                 let value;
                 switch (column) {
                     case 'fullName':      value = lead.full_name; break;
                     case 'phone':         value = lead.phone || null; break;
                     case 'email':         value = lead.email || null; break;
-                    case 'course':        value = lead.course || null; break;
-                    case 'qualification': value = lead.qualification || null; break;
-                    case 'date':
-                        value = recordView === 'registered' && lead.registered_at
-                            ? new Date(lead.registered_at).toLocaleDateString()
-                            : new Date(lead.created_at).toLocaleDateString();
-                        break;
+                    case 'institute':     value = lead.institute_name || null; break;
                     default: value = '';
                 }
                 if (value) values.add(value);
@@ -165,10 +190,11 @@ export default function Leads() {
     };
 
     const clearAllFilters = () => {
-        setColumnFilters({ fullName: [], phone: [], email: [], countries: [], course: [], qualification: [], date: [] });
-        setFilterSearch({ fullName: '', phone: '', email: '', countries: '', course: '', qualification: '', date: '' });
+        setColumnFilters({ fullName: [], phone: [], email: [], countries: [], institute: [], qualification: [] });
+        setFilterSearch({ fullName: '', phone: '', email: '', countries: '', institute: '', qualification: '' });
         setSearchTerm('');
         setStatFilter(null);
+        setDateRange(EMPTY_DATE_RANGE);
     };
 
     const handleViewChange = (view) => {
@@ -212,17 +238,27 @@ export default function Leads() {
             if (!hasMatch) return false;
         }
 
-        if (columnFilters.course.length > 0 && !columnFilters.course.includes(lead.course)) return false;
-        if (columnFilters.qualification.length > 0 && !columnFilters.qualification.includes(lead.qualification)) return false;
-        if (columnFilters.date.length > 0) {
-            const dateStr = recordView === 'registered' && lead.registered_at
-                ? new Date(lead.registered_at).toLocaleDateString()
-                : new Date(lead.created_at).toLocaleDateString();
-            if (!columnFilters.date.includes(dateStr)) return false;
+        if (columnFilters.institute.length > 0 && !columnFilters.institute.includes(lead.institute_name)) return false;
+        if (columnFilters.qualification.length > 0) {
+            const leadLevels = parseQualificationLevels(lead);
+            const hasMatch = columnFilters.qualification.some(q => leadLevels.includes(q));
+            if (!hasMatch) return false;
+        }
+
+        if (hasDateRange(dateRange)) {
+            const leadDate = recordView === 'registered' && lead.registered_at
+                ? lead.registered_at
+                : lead.created_at;
+            if (!isDateInRange(leadDate, dateRange.from, dateRange.to)) return false;
         }
 
         return true;
     });
+
+    const { paginatedItems: paginatedLeads, totalPages, currentPage, goToPage } = useListPagination(
+        filteredLeads,
+        [searchTerm, JSON.stringify(columnFilters), dateRange.from, dateRange.to, recordView, statFilter].join('|')
+    );
 
     const newLeadsCount = recordView === 'active'
         ? leads.filter(isNewLead).length
@@ -231,7 +267,7 @@ export default function Leads() {
         ? leads.filter(isAssignedLead).length
         : 0;
 
-    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || (recordView === 'active' && statFilter);
+    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || (recordView === 'active' && statFilter) || hasDateRange(dateRange);
 
     // ── FilterDropdown component ───────────────────────────────────────────────
     const FilterDropdown = ({ column, label }) => {
@@ -325,6 +361,26 @@ export default function Leads() {
         );
     };
 
+    const formatPrintDate = (dateStr) => (dateStr ? new Date(dateStr).toLocaleDateString() : '-');
+
+    const printColumns = [
+        { header: 'Full Name', value: (r) => r.full_name },
+        { header: 'Contact Number', value: (r) => r.phone || '-' },
+        { header: 'Email', value: (r) => r.email },
+        { header: 'Countries', value: (r) => parseCountriesDisplay(r.countries_of_interest) },
+        { header: 'School/College/Institute', value: (r) => r.institute_name || '-' },
+        { header: 'Qualification', value: (r) => parseQualificationsDisplay(r) },
+        {
+            header: recordView === 'registered' ? 'Registered On' : 'Walk-in Date',
+            value: (r) => recordView === 'registered' && r.registered_at
+                ? formatPrintDate(r.registered_at)
+                : formatPrintDate(r.created_at),
+        },
+    ];
+    if (recordView === 'registered') {
+        printColumns.push({ header: 'Follow-ups', value: (r) => r.follow_up_count || 0 });
+    }
+
     return (
         <>
             <Sidebar />
@@ -339,6 +395,12 @@ export default function Leads() {
                             </h1>
                         </div>
                         <div className="header-right">
+                            <PrintReportButton
+                                show={hasActiveFilters}
+                                title={`Leads Management${recordView === 'registered' ? ' — Registered Students' : ''}`}
+                                columns={printColumns}
+                                rows={filteredLeads}
+                            />
                             {hasActiveFilters && (
                                 <button className="btn-clear-all-filters" onClick={clearAllFilters}>
                                     <FontAwesomeIcon icon={faTimes} />
@@ -443,28 +505,31 @@ export default function Leads() {
                         </div>
                     )}
 
-                    {/* Search Bar */}
-                    <div style={{ marginBottom: '16px', position: 'relative' }}>
-                        <FontAwesomeIcon
-                            icon={faSearch}
-                            style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: '14px' }}
+                    <div className="page-toolbar">
+                        <div className="page-search">
+                            <FontAwesomeIcon icon={faSearch} className="page-search-icon" />
+                            <input
+                                type="text"
+                                className="page-search-input"
+                                placeholder="Search leads..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                            {searchTerm && (
+                                <button
+                                    type="button"
+                                    className="page-search-clear"
+                                    onClick={() => setSearchTerm('')}
+                                >
+                                    <FontAwesomeIcon icon={faTimes} />
+                                </button>
+                            )}
+                        </div>
+                        <DateRangeFilter
+                            label={recordView === 'registered' ? 'Registered On' : 'Walk-in Date'}
+                            value={dateRange}
+                            onChange={setDateRange}
                         />
-                        <input
-                            type="text"
-                            className="form-control"
-                            placeholder="Search leads..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            style={{ paddingLeft: '40px', borderRadius: '10px', border: '1px solid #e5e7eb', height: '42px' }}
-                        />
-                        {searchTerm && (
-                            <button
-                                onClick={() => setSearchTerm('')}
-                                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}
-                            >
-                                <FontAwesomeIcon icon={faTimes} />
-                            </button>
-                        )}
                     </div>
 
                     {loading ? (
@@ -481,18 +546,22 @@ export default function Leads() {
                                             <th><FilterDropdown column="phone" label="Contact Number" /></th>
                                             <th><FilterDropdown column="email" label="Email" /></th>
                                             <th><FilterDropdown column="countries" label="Countries" /></th>
-                                            <th><FilterDropdown column="course" label="Course" /></th>
+                                            <th><FilterDropdown column="institute" label="School/College/Institute" /></th>
                                             <th><FilterDropdown column="qualification" label="Qualification" /></th>
-                                            <th><FilterDropdown column="date" label={recordView === 'registered' ? 'Registered On' : 'Walk-in Date'} /></th>
+                                            <th>{recordView === 'registered' ? 'Registered On' : 'Walk-in Date'}</th>
                                             {recordView === 'registered' && <th>Follow-ups</th>}
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {filteredLeads.length > 0 ? (
-                                            filteredLeads.map((lead) => (
+                                            paginatedLeads.map((lead) => (
                                                 <tr key={lead.id}>
-                                                    <td><strong>{lead.full_name}</strong></td>
+                                                    <td>
+                                                        <Link to={`/edit-lead/${lead.id}`} className="table-name-link">
+                                                            {lead.full_name}
+                                                        </Link>
+                                                    </td>
                                                     <td>{lead.phone || '-'}</td>
                                                     <td>{lead.email}</td>
                                                     <td>
@@ -500,8 +569,8 @@ export default function Leads() {
                                                             {parseCountriesDisplay(lead.countries_of_interest)}
                                                         </span>
                                                     </td>
-                                                    <td>{lead.course || '-'}</td>
-                                                    <td>{lead.qualification || '-'}</td>
+                                                    <td>{lead.institute_name || '-'}</td>
+                                                    <td>{parseQualificationsDisplay(lead)}</td>
                                                     <td>
                                                         {recordView === 'registered' && lead.registered_at
                                                             ? new Date(lead.registered_at).toLocaleDateString()
@@ -512,6 +581,14 @@ export default function Leads() {
                                                     )}
                                                     <td>
                                                         <div className="action-buttons">
+                                                            <button
+                                                                type="button"
+                                                                className="btn-icon btn-view"
+                                                                title="View Lead"
+                                                                onClick={() => setViewRecordId(lead.id)}
+                                                            >
+                                                                <FontAwesomeIcon icon={faEye} />
+                                                            </button>
                                                             {recordView === 'registered' && lead.student_user_id ? (
                                                                 <Link to={`/edit-student/${lead.student_user_id}`} className="btn-icon btn-edit" title="View Student">
                                                                     <FontAwesomeIcon icon={faUserGraduate} />
@@ -538,19 +615,22 @@ export default function Leads() {
                                 </table>
                             </div>
 
-                            <div className="pagination">
-                                <button className="btn-secondary">Previous</button>
-                                <div className="page-numbers">
-                                    <button className="page-number active">1</button>
-                                    <button className="page-number">2</button>
-                                    <button className="page-number">3</button>
-                                </div>
-                                <button className="btn-secondary">Next</button>
-                            </div>
+                            <ListPagination
+                                total={filteredLeads.length}
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                onPageChange={goToPage}
+                                itemLabel="lead"
+                            />
                         </>
                     )}
                 </div>
             </div>
+            {viewRecordId && (
+                <ViewRecordModal title="View Lead" onClose={() => setViewRecordId(null)}>
+                    <EditLead recordId={viewRecordId} viewOnly />
+                </ViewRecordModal>
+            )}
         </>
     );
 }

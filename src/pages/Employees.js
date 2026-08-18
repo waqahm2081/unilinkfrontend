@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import '../styles/dashboard.css'
+import '../styles/logs.css'
+import '../styles/leads.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import PrintReportButton from '../components/PrintReportButton'
+import DateRangeFilter from '../components/DateRangeFilter'
+import ListPagination from '../components/ListPagination'
+import useListPagination from '../hooks/useListPagination'
+import { EMPTY_DATE_RANGE, hasDateRange } from '../utils/dateRange'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faUsers,
@@ -41,6 +48,7 @@ export default function Employees() {
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -56,7 +64,7 @@ export default function Employees() {
 
   useEffect(() => {
     fetchEmployees();
-  }, [filterDepartment, filterStatus, searchQuery]);
+  }, [filterDepartment, filterStatus, searchQuery, dateRange]);
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -66,6 +74,10 @@ export default function Employees() {
       if (filterDepartment) params.append('department', filterDepartment);
       if (filterStatus) params.append('status', filterStatus);
       if (searchQuery) params.append('searchQuery', searchQuery);
+      if (hasDateRange(dateRange)) {
+        if (dateRange.from) params.append('dateFrom', dateRange.from);
+        if (dateRange.to) params.append('dateTo', dateRange.to);
+      }
 
       const response = await fetch(`${API_URL}/employees?${params.toString()}`);
       const data = await response.json();
@@ -193,6 +205,32 @@ export default function Employees() {
     return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
+  const hasActiveFilters = searchQuery.trim() || filterDepartment || filterStatus || hasDateRange(dateRange);
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilterDepartment('');
+    setFilterStatus('');
+    setDateRange(EMPTY_DATE_RANGE);
+  };
+
+  const { paginatedItems: paginatedEmployees, totalPages, currentPage, goToPage } = useListPagination(
+    employees,
+    [searchQuery, filterDepartment, filterStatus, dateRange.from, dateRange.to].join('|')
+  );
+
+  const printColumns = [
+    { header: 'Employee ID', value: (r) => r.employee_id },
+    { header: 'Name', value: (r) => r.name },
+    { header: 'Email', value: (r) => r.email || '-' },
+    { header: 'Department', value: (r) => r.department || '-' },
+    { header: 'Designation', value: (r) => r.designation || '-' },
+    { header: 'Contact', value: (r) => r.phone || '-' },
+    { header: 'Salary', value: (r) => formatSalary(r.salary) },
+    { header: 'Joining Date', value: (r) => formatDate(r.joining_date) },
+    { header: 'Status', value: (r) => r.status },
+  ];
+
   return (
     <>
       <Sidebar />
@@ -209,6 +247,17 @@ export default function Employees() {
               </h1>
             </div>
             <div className="header-right">
+              <PrintReportButton
+                show={hasActiveFilters}
+                title="HR — Employees"
+                columns={printColumns}
+                rows={employees}
+              />
+              {hasActiveFilters && (
+                <button className="btn-clear-all-filters" onClick={clearAllFilters}>
+                  <FontAwesomeIcon icon={faTimes} /> Clear All Filters
+                </button>
+              )}
               <button className="btn-primary" onClick={openCreateModal}>
                 <FontAwesomeIcon icon={faPlus} />
                 Add Employee
@@ -258,12 +307,18 @@ export default function Employees() {
                 {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
+            <DateRangeFilter
+              label="Joining Date"
+              value={dateRange}
+              onChange={setDateRange}
+            />
           </div>
 
           {/* Table */}
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px' }}><p>Loading employees...</p></div>
           ) : (
+            <>
             <div className="logs-table-container">
               <table className="logs-table">
                 <thead>
@@ -280,7 +335,7 @@ export default function Employees() {
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.length > 0 ? employees.map(emp => (
+                  {employees.length > 0 ? paginatedEmployees.map(emp => (
                     <tr key={emp.id}>
                       <td><span className="log-id">{emp.employee_id}</span></td>
                       <td>
@@ -316,6 +371,14 @@ export default function Employees() {
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              total={employees.length}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={goToPage}
+              itemLabel="employee"
+            />
+            </>
           )}
         </div>
       </div>

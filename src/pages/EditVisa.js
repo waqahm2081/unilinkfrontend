@@ -3,6 +3,7 @@ import '../styles/dashboard.css'
 import '../styles/visa.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import { ViewModeWrap } from '../components/ViewRecordModal'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -17,9 +18,10 @@ import {
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
-export default function EditVisa() {
+export default function EditVisa({ recordId, viewOnly = false } = {}) {
     const navigate = useNavigate();
-    const { id } = useParams();
+    const { id: paramId } = useParams();
+    const id = recordId || paramId;
 
     const [selectedStudent, setSelectedStudent] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -302,6 +304,7 @@ export default function EditVisa() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (viewOnly) return;
 
         setLoading(true);
         setError('');
@@ -344,7 +347,7 @@ export default function EditVisa() {
 
     if (loading && !selectedStudent) {
         return (
-            <>
+            <ViewModeWrap viewOnly={viewOnly}>
                 <Sidebar />
                 <div className="main-content">
                     <Header />
@@ -357,12 +360,12 @@ export default function EditVisa() {
                         </div>
                     </div>
                 </div>
-            </>
+            </ViewModeWrap>
         );
     }
 
     return (
-        <>
+        <ViewModeWrap viewOnly={viewOnly}>
             <Sidebar />
 
             <div className="main-content" id="mainContent">
@@ -375,7 +378,7 @@ export default function EditVisa() {
                                 <div>
                                     <h1 className="mb-2">
                                         <FontAwesomeIcon icon={faPassport} className="me-2 text-primary" />
-                                        Edit Visa
+                                        {viewOnly ? 'Visa Details' : 'Edit Visa'}
                                     </h1>
                                 </div>
                                 <div>
@@ -1007,6 +1010,6 @@ export default function EditVisa() {
                     </form>
                 </div>
             </div>
-        </>
+        </ViewModeWrap>
     )
 }

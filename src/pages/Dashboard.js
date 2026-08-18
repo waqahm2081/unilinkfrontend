@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import '../styles/dashboard.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faUsers, faUserGraduate, faFileAlt, faClock, faPassport,
-  faList, faPlus, faEdit, faTrash, faChevronDown, faTimes,
+  faUsers, faUserGraduate, faFileAlt, faPassport,
+  faList, faEdit, faTrash,
   faUserTie, faPhone,
 } from "@fortawesome/free-solid-svg-icons";
 
@@ -38,24 +38,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  const [activeFilter, setActiveFilter] = useState(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
-  const [columnFilters, setColumnFilters] = useState({
-    studentName: [], country: [], program: [], counselor: [], status: [], date: []
-  });
-  const [filterSearch, setFilterSearch] = useState({
-    studentName: '', country: '', program: '', counselor: '', status: '', date: ''
-  });
-
   useEffect(() => { fetchDashboardData(); }, []);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (!e.target.closest('.filter-dropdown-container')) setActiveFilter(null);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const fetchDashboardData = async () => {
     try {
@@ -96,150 +79,6 @@ export default function Dashboard() {
   const formatDate = (dateString) => {
     if (!dateString) return '-';
     return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-  };
-
-  // ── Filter helpers ─────────────────────────────────────────────────────────
-  const getUniqueValues = (column) => {
-    const values = new Set();
-    recentApplications.forEach(app => {
-      let value;
-      switch (column) {
-        case 'studentName': value = app.student_name; break;
-        case 'country':     value = app.country_name; break;
-        case 'program':     value = app.program || null; break;
-        case 'counselor':   value = app.counselor_names || 'Not Assigned'; break;
-        case 'status':      value = app.application_status; break;
-        case 'date':        value = app.created_at ? formatDate(app.created_at) : null; break;
-        default: value = '';
-      }
-      if (value) values.add(value);
-    });
-    return Array.from(values).sort();
-  };
-
-  const getFilteredOptions = (column) => {
-    const unique = getUniqueValues(column);
-    const term = filterSearch[column].toLowerCase();
-    return term ? unique.filter(v => v.toLowerCase().includes(term)) : unique;
-  };
-
-  const toggleFilterValue = (column, value) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: prev[column].includes(value)
-        ? prev[column].filter(v => v !== value)
-        : [...prev[column], value]
-    }));
-  };
-
-  const clearColumnFilter = (column) => {
-    setColumnFilters(prev => ({ ...prev, [column]: [] }));
-    setFilterSearch(prev => ({ ...prev, [column]: '' }));
-  };
-
-  const clearAllFilters = () => {
-    setColumnFilters({ studentName: [], country: [], program: [], counselor: [], status: [], date: [] });
-    setFilterSearch({ studentName: '', country: '', program: '', counselor: '', status: '', date: '' });
-  };
-
-  const filteredApplications = recentApplications.filter(app => {
-    if (columnFilters.studentName.length > 0 && !columnFilters.studentName.includes(app.student_name)) return false;
-    if (columnFilters.country.length > 0 && !columnFilters.country.includes(app.country_name)) return false;
-    if (columnFilters.program.length > 0 && !columnFilters.program.includes(app.program)) return false;
-    if (columnFilters.status.length > 0 && !columnFilters.status.includes(app.application_status)) return false;
-    if (columnFilters.counselor.length > 0) {
-      const val = app.counselor_names || 'Not Assigned';
-      if (!columnFilters.counselor.includes(val)) return false;
-    }
-    if (columnFilters.date.length > 0) {
-      const val = app.created_at ? formatDate(app.created_at) : null;
-      if (!columnFilters.date.includes(val)) return false;
-    }
-    return true;
-  });
-
-  const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0);
-
-  // ── FilterDropdown component ───────────────────────────────────────────────
-  const FilterDropdown = ({ column, label }) => {
-    const triggerRef = useRef(null);
-    const isActive = activeFilter === column;
-    const hasFilters = columnFilters[column].length > 0;
-    const filteredOptions = getFilteredOptions(column);
-    const allOptions = getUniqueValues(column);
-
-    const handleToggle = () => {
-      if (isActive) { setActiveFilter(null); return; }
-      const rect = triggerRef.current.getBoundingClientRect();
-      const dropdownHeight = 360;
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-      let top = (spaceBelow >= dropdownHeight || spaceBelow > spaceAbove)
-        ? rect.bottom + 8
-        : rect.top - dropdownHeight - 8;
-      let left = rect.left;
-      if (left + 280 > window.innerWidth) left = window.innerWidth - 300;
-      setDropdownPosition({ top, left });
-      setActiveFilter(column);
-    };
-
-    return (
-      <div className="filter-dropdown-container">
-        <button
-          ref={triggerRef}
-          className={`filter-trigger ${hasFilters ? 'has-filters' : ''}`}
-          onClick={handleToggle}
-        >
-          {label}
-          <FontAwesomeIcon icon={faChevronDown} className="filter-icon" />
-          {hasFilters && <span className="filter-count">{columnFilters[column].length}</span>}
-        </button>
-        {isActive && (
-          <div className="filter-dropdown" style={{ top: `${dropdownPosition.top}px`, left: `${dropdownPosition.left}px` }}>
-            <div className="filter-dropdown-header">
-              <input
-                type="text"
-                className="filter-search-input"
-                placeholder="Search..."
-                value={filterSearch[column]}
-                onChange={(e) => setFilterSearch(prev => ({ ...prev, [column]: e.target.value }))}
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-            <div className="filter-options">
-              <label className="filter-option select-all">
-                <input
-                  type="checkbox"
-                  checked={columnFilters[column].length === allOptions.length && allOptions.length > 0}
-                  onChange={(e) => {
-                    if (e.target.checked) setColumnFilters(prev => ({ ...prev, [column]: allOptions }));
-                    else clearColumnFilter(column);
-                  }}
-                />
-                <span className="filter-label">Select All</span>
-              </label>
-              {filteredOptions.length > 0
-                ? filteredOptions.map((value, i) => (
-                  <label key={i} className="filter-option">
-                    <input
-                      type="checkbox"
-                      checked={columnFilters[column].includes(value)}
-                      onChange={() => toggleFilterValue(column, value)}
-                    />
-                    <span className="filter-label">{value}</span>
-                  </label>
-                ))
-                : <div className="no-results">No results found</div>
-              }
-            </div>
-            <div className="filter-dropdown-footer">
-              <button className="btn-clear-filter" onClick={() => clearColumnFilter(column)}>Clear</button>
-              <button className="btn-apply-filter" onClick={() => setActiveFilter(null)}>Apply</button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
   };
 
   return (
@@ -326,31 +165,19 @@ export default function Dashboard() {
                     <FontAwesomeIcon icon={faList} className="me-2" />
                     Recent Applications
                   </h5>
-                  <div className="chart-actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    {hasActiveFilters && (
-                      <button className="btn btn-sm btn-outline-secondary" onClick={clearAllFilters}>
-                        <FontAwesomeIcon icon={faTimes} className="me-1" />
-                        Clear Filters
-                      </button>
-                    )}
-                    <Link to="/create-application" className="btn btn-sm btn-primary">
-                      <FontAwesomeIcon icon={faPlus} className="me-2" />
-                      New Application
-                    </Link>
-                  </div>
                 </div>
 
                 <div className="table-responsive">
                   <table className="table table-hover">
                     <thead>
                       <tr>
-                        <th><FilterDropdown column="studentName" label="Student Name" /></th>
+                        <th>Student Name</th>
                         <th>Register ID</th>
-                        <th><FilterDropdown column="country" label="Country" /></th>
-                        <th><FilterDropdown column="program" label="Program" /></th>
-                        <th><FilterDropdown column="counselor" label="Counselor Assigned" /></th>
-                        <th><FilterDropdown column="status" label="Status" /></th>
-                        <th><FilterDropdown column="date" label="Registration Date" /></th>
+                        <th>Country</th>
+                        <th>Program</th>
+                        <th>Counselor Assigned</th>
+                        <th>Status</th>
+                        <th>Registration Date</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -362,14 +189,14 @@ export default function Dashboard() {
                             Loading...
                           </td>
                         </tr>
-                      ) : filteredApplications.length === 0 ? (
+                      ) : recentApplications.length === 0 ? (
                         <tr>
                           <td colSpan="8" className="text-center py-4 text-muted">
-                            {hasActiveFilters ? 'No applications match the selected filters' : 'No applications found'}
+                            No applications found
                           </td>
                         </tr>
                       ) : (
-                        filteredApplications.map(app => {
+                        recentApplications.map(app => {
                           const statusStyle = getStatusStyle(app.application_status);
                           return (
                             <tr key={app.id}>
@@ -380,7 +207,9 @@ export default function Dashboard() {
                                     className="table-avatar me-2"
                                     alt={app.student_name}
                                   />
-                                  <strong>{app.student_name}</strong>
+                                  <Link to={`/edit-application/${app.id}`} className="table-name-link">
+                                    {app.student_name}
+                                  </Link>
                                 </div>
                               </td>
                               <td>

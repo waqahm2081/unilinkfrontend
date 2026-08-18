@@ -4,6 +4,9 @@ import '../styles/leads.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
 import MeetingScheduler from '../components/MeetingScheduler'
+import CountryMultiSelect from '../components/CountryMultiSelect'
+import { ViewModeWrap } from '../components/ViewRecordModal'
+import { REFERRED_BY_OPTIONS } from '../constants/referredByOptions'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -29,18 +32,37 @@ import {
     faMoneyBillWave,
     faExternalLinkAlt,
     faUserGraduate,
+    faReceipt,
 } from "@fortawesome/free-solid-svg-icons";
+
+const LEAD_STATUS_OPTIONS = [
+    { value: 'new', label: 'New' },
+    { value: 'contacted', label: 'Contacted' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'converted', label: 'Converted' },
+    { value: 'closed', label: 'Closed' },
+];
+
+const normalizeLeadStatus = (value) => {
+    if (!value) return 'new';
+    const key = String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return LEAD_STATUS_OPTIONS.some(opt => opt.value === key) ? key : 'new';
+};
+
+const leadStatusLabel = (value) => {
+    const match = LEAD_STATUS_OPTIONS.find(opt => opt.value === normalizeLeadStatus(value));
+    return match ? match.label : 'New';
+};
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
-const QUALIFICATION_LEVELS = [
-    'O Level', 'A Level', 'Matric', 'FSc', 'Intermediate', 'Bachelors', 'Masters', 'Other'
+const QUALIFICATION_OPTIONS = [
+    'O Level', 'A Level', 'Matriculation', 'Intermediate', 'Graduate', 'Post Graduate'
 ];
 
-const REFERRED_BY_OPTIONS = [
-    'Social Media', 'Friend or Family', 'Website', 'Walk-in',
-    'Education Fair', 'School / College', 'Advertisement', 'Other'
-];
+const SUBJECT_GRADE_LEVELS = ['O Level', 'A Level'];
+const PERCENTAGE_LEVELS = ['Matriculation', 'Intermediate'];
+const CGPA_LEVELS = ['Graduate', 'Post Graduate'];
 
 const ADMISSION_TEST_LABELS = {
     ielts: 'IELTS',
@@ -56,19 +78,127 @@ const DEFAULT_ADMISSION_TESTS = {
     gre_gmat: { attempted: '', score: '', date: '' }
 };
 
-const DEFAULT_QUALIFICATION_ROW = { qualification: '', subject: '', grade: '' };
+const emptySubjectRow = () => ({ subject: '', grade: '' });
+
+const emptyQualificationDetails = () => ({
+    'O Level': { subjects: [emptySubjectRow()] },
+    'A Level': { subjects: [emptySubjectRow()] },
+    'Matriculation': { percentage: '' },
+    'Intermediate': { percentage: '' },
+    'Graduate': { cgpaDivision: '' },
+    'Post Graduate': { cgpaDivision: '' }
+});
+
+const emptyQualificationsState = () => ({
+    selected: [],
+    details: emptyQualificationDetails()
+});
+
+const normalizeLevelName = (name) => {
+    if (!name) return '';
+    const map = {
+        'O levels': 'O Level', 'O Levels': 'O Level', 'O Level': 'O Level',
+        'A levels': 'A Level', 'A Levels': 'A Level', 'A Level': 'A Level',
+        'Matric': 'Matriculation', 'Matriculation': 'Matriculation',
+        'FSc': 'Intermediate', 'Intermediate': 'Intermediate',
+        'Bachelors': 'Graduate', 'Bachelor': 'Graduate', 'Graduate': 'Graduate',
+        'Masters': 'Post Graduate', 'Master': 'Post Graduate', 'Post Graduate': 'Post Graduate', 'Postgraduate': 'Post Graduate'
+    };
+    return map[name] || (QUALIFICATION_OPTIONS.includes(name) ? name : '');
+};
 
 const parseQualificationsFromLead = (lead) => {
+    const state = emptyQualificationsState();
+    let parsed = null;
+
     if (lead.qualifications) {
         try {
-            const parsed = typeof lead.qualifications === 'string' ? JSON.parse(lead.qualifications) : lead.qualifications;
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            parsed = typeof lead.qualifications === 'string' ? JSON.parse(lead.qualifications) : lead.qualifications;
         } catch (e) { /* fall through */ }
     }
-    if (lead.qualification || lead.grades) {
-        return [{ qualification: lead.qualification || '', subject: '', grade: lead.grades || '' }];
+
+    if (Array.isArray(parsed) && parsed.length > 0) {
+        if (parsed[0].level || parsed.some(q => q.subjects || q.percentage != null || q.cgpaDivision != null)) {
+            parsed.forEach(entry => {
+                const level = normalizeLevelName(entry.level || entry.qualification);
+                if (!level || !QUALIFICATION_OPTIONS.includes(level)) return;
+                if (!state.selected.includes(level)) state.selected.push(level);
+
+                if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                    const subjects = Array.isArray(entry.subjects) && entry.subjects.length > 0
+                        ? entry.subjects.map(s => ({ subject: s.subject || '', grade: s.grade || '' }))
+                        : (entry.subject || entry.grade
+                            ? [{ subject: entry.subject || '', grade: entry.grade || '' }]
+                            : [emptySubjectRow()]);
+                    state.details[level] = { subjects };
+                } else if (PERCENTAGE_LEVELS.includes(level)) {
+                    state.details[level] = { percentage: entry.percentage || entry.grade || '' };
+                } else if (CGPA_LEVELS.includes(level)) {
+                    state.details[level] = { cgpaDivision: entry.cgpaDivision || entry.grade || '' };
+                }
+            });
+            return state;
+        }
+
+        const byLevel = {};
+        parsed.forEach(row => {
+            const level = normalizeLevelName(row.qualification);
+            if (!level) return;
+            if (!state.selected.includes(level)) state.selected.push(level);
+            if (!byLevel[level]) byLevel[level] = [];
+            if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                byLevel[level].push({ subject: row.subject || '', grade: row.grade || '' });
+            } else if (PERCENTAGE_LEVELS.includes(level)) {
+                state.details[level] = { percentage: row.grade || row.subject || '' };
+            } else if (CGPA_LEVELS.includes(level)) {
+                state.details[level] = { cgpaDivision: row.grade || row.subject || '' };
+            }
+        });
+        Object.keys(byLevel).forEach(level => {
+            state.details[level] = {
+                subjects: byLevel[level].length > 0 ? byLevel[level] : [emptySubjectRow()]
+            };
+        });
+        return state;
     }
-    return [{ ...DEFAULT_QUALIFICATION_ROW }];
+
+    if (lead.qualification || lead.grades) {
+        const level = normalizeLevelName(lead.qualification);
+        if (level) {
+            state.selected = [level];
+            if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                state.details[level] = { subjects: [{ subject: '', grade: lead.grades || '' }] };
+            } else if (PERCENTAGE_LEVELS.includes(level)) {
+                state.details[level] = { percentage: lead.grades || '' };
+            } else if (CGPA_LEVELS.includes(level)) {
+                state.details[level] = { cgpaDivision: lead.grades || '' };
+            }
+        }
+    }
+    return state;
+};
+
+const buildQualificationsForApi = (qualifications) => {
+    if (!qualifications?.selected?.length) return [];
+    return qualifications.selected.map(level => {
+        const detail = qualifications.details?.[level] || {};
+        if (SUBJECT_GRADE_LEVELS.includes(level)) {
+            return {
+                level,
+                subjects: (detail.subjects || []).map(s => ({
+                    subject: (s.subject || '').trim(),
+                    grade: (s.grade || '').trim()
+                }))
+            };
+        }
+        if (PERCENTAGE_LEVELS.includes(level)) {
+            return { level, percentage: (detail.percentage || '').trim() };
+        }
+        if (CGPA_LEVELS.includes(level)) {
+            return { level, cgpaDivision: (detail.cgpaDivision || '').trim() };
+        }
+        return { level };
+    });
 };
 
 const parseAdmissionTestsFromLead = (lead) => {
@@ -132,6 +262,7 @@ const formatLeadCountries = (countries, countriesOther) =>
 
 const buildApplicantInfoFromLead = (lead) => {
     const nameParts = (lead.full_name || '').trim().split(/\s+/).filter(Boolean);
+    const countryNames = resolveLeadCountries(lead.countries_of_interest, lead.countries_other);
     return {
         name: nameParts[0] || '',
         middle_name: nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '',
@@ -139,14 +270,16 @@ const buildApplicantInfoFromLead = (lead) => {
         email: lead.email || '',
         mobile: lead.phone || '',
         address: lead.address || '',
-        course: lead.course || '',
-        source_inquiry: lead.interest || '',
+        country: countryNames.length ? countryNames.join(', ') : '',
+        course: lead.course || lead.program || '',
+        source_inquiry: lead.referred_by || '',
         status: 'Active',
     };
 };
 
-export default function EditLead() {
-    const { id } = useParams();
+export default function EditLead({ recordId, viewOnly = false } = {}) {
+    const { id: paramId } = useParams();
+    const id = recordId || paramId;
     const navigate = useNavigate();
 
     const [leadData, setLeadData] = useState({
@@ -156,13 +289,14 @@ export default function EditLead() {
         address: '',
         interest: '',
         program: '',
+        institute_name: '',
         comments: '',
-        status: 'New',
+        status: 'new',
         is_registered: false,
         countries_of_interest: [],
         countries_other: '',
         course: '',
-        qualifications: [{ ...DEFAULT_QUALIFICATION_ROW }],
+        qualifications: emptyQualificationsState(),
         referred_by: '',
         admission_tests: JSON.parse(JSON.stringify(DEFAULT_ADMISSION_TESTS))
     });
@@ -195,7 +329,8 @@ export default function EditLead() {
     const [leadInvoices, setLeadInvoices] = useState([]);
     const [leadInvoicesLoading, setLeadInvoicesLoading] = useState(false);
     const [selectedInvoice, setSelectedInvoice] = useState(null);
-    const [paymentForm, setPaymentForm] = useState({ paymentStatus: 'Pending', paidAmount: '', paymentDate: '' });
+    const [paymentForm, setPaymentForm] = useState({ paymentStatus: 'Pending', installmentAmount: '', paymentDate: '' });
+    const [invoicePayments, setInvoicePayments] = useState([]);
     const [updatingPayment, setUpdatingPayment] = useState(false);
     const [paymentModalError, setPaymentModalError] = useState('');
     const [linkingInvoice, setLinkingInvoice] = useState(false);
@@ -229,7 +364,9 @@ export default function EditLead() {
                     countries_of_interest: parseCountries(data.lead.countries_of_interest),
                     countries_other: data.lead.countries_other || '',
                     course: data.lead.course || '',
+                    status: normalizeLeadStatus(data.lead.status),
                     program: data.lead.program || '',
+                    institute_name: data.lead.institute_name || '',
                     interest: data.lead.interest || '',
                     comments: data.lead.counsellor_notes || data.lead.comments || '',
                     referred_by: data.lead.referred_by || '',
@@ -271,14 +408,20 @@ export default function EditLead() {
                     setSelectedInvoice(data.linkedInvoice);
                     setPaymentForm({
                         paymentStatus: data.linkedInvoice.payment_status || 'Pending',
-                        paidAmount: data.linkedInvoice.paid_amount || '',
-                        paymentDate: data.linkedInvoice.payment_date
-                            ? data.linkedInvoice.payment_date.slice(0, 10)
-                            : ''
+                        installmentAmount: '',
+                        paymentDate: new Date().toISOString().slice(0, 10)
                     });
+                    try {
+                        const payRes = await fetch(`${API_URL}/finance/invoices/${data.linkedInvoice.id}/payments`);
+                        const payData = await payRes.json();
+                        setInvoicePayments(payData.success ? (payData.payments || []) : []);
+                    } catch {
+                        setInvoicePayments([]);
+                    }
                 } else {
                     setSelectedInvoice(null);
-                    setPaymentForm({ paymentStatus: 'Pending', paidAmount: '', paymentDate: '' });
+                    setInvoicePayments([]);
+                    setPaymentForm({ paymentStatus: 'Pending', installmentAmount: '', paymentDate: new Date().toISOString().slice(0, 10) });
                 }
             } else {
                 setPaymentModalError(data.message || 'Failed to load invoices');
@@ -311,8 +454,8 @@ export default function EditLead() {
                 setPaymentStatus(data.paymentStatus);
                 setPaymentForm({
                     paymentStatus: invoice.payment_status || 'Pending',
-                    paidAmount: invoice.paid_amount || '',
-                    paymentDate: invoice.payment_date ? invoice.payment_date.slice(0, 10) : ''
+                    installmentAmount: '',
+                    paymentDate: new Date().toISOString().slice(0, 10)
                 });
                 await fetchLeadInvoices();
                 setLeadData(prev => ({ ...prev, payment_status: data.paymentStatus, invoice_id: invoice.id }));
@@ -328,19 +471,37 @@ export default function EditLead() {
 
     const handleUpdateInvoicePayment = async () => {
         if (!selectedInvoice) return;
+        const amount = parseFloat(paymentForm.installmentAmount);
+        const hasInstallment = isFinite(amount) && amount > 0;
         setUpdatingPayment(true);
         setPaymentModalError('');
         try {
-            const res = await fetch(`${API_URL}/finance/invoices/${selectedInvoice.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(paymentForm)
-            });
-            const data = await res.json();
+            let data;
+            if (hasInstallment) {
+                const res = await fetch(`${API_URL}/finance/invoices/${selectedInvoice.id}/payments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        amount,
+                        paymentDate: paymentForm.paymentDate,
+                        paymentStatus: paymentForm.paymentStatus
+                    })
+                });
+                data = await res.json();
+            } else {
+                const res = await fetch(`${API_URL}/finance/invoices/${selectedInvoice.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paymentStatus: paymentForm.paymentStatus })
+                });
+                data = await res.json();
+            }
             if (data.success) {
-                const leadStatus = mapInvoiceStatusToLead(paymentForm.paymentStatus);
+                const status = data.paymentStatus || paymentForm.paymentStatus;
+                const leadStatus = mapInvoiceStatusToLead(status);
                 setPaymentStatus(leadStatus);
                 setLeadData(prev => ({ ...prev, payment_status: leadStatus }));
+                if (data.payments) setInvoicePayments(data.payments);
                 await fetchLeadInvoices();
             } else {
                 setPaymentModalError(data.message || 'Failed to update payment');
@@ -428,28 +589,97 @@ export default function EditLead() {
         });
     };
 
-    const handleQualificationChange = (index, field, value) => {
+    const handleQualificationToggle = (level) => {
         setLeadData(prev => {
-            const qualifications = [...(prev.qualifications || [])];
-            qualifications[index] = { ...qualifications[index], [field]: value };
-            return { ...prev, qualifications };
+            const selected = prev.qualifications?.selected || [];
+            const isSelected = selected.includes(level);
+            const nextSelected = isSelected
+                ? selected.filter(l => l !== level)
+                : [...selected, level];
+
+            const details = { ...(prev.qualifications?.details || emptyQualificationDetails()) };
+            if (!isSelected) {
+                if (SUBJECT_GRADE_LEVELS.includes(level)) {
+                    details[level] = { subjects: [emptySubjectRow()] };
+                } else if (PERCENTAGE_LEVELS.includes(level)) {
+                    details[level] = { percentage: '' };
+                } else if (CGPA_LEVELS.includes(level)) {
+                    details[level] = { cgpaDivision: '' };
+                }
+            }
+
+            return {
+                ...prev,
+                qualifications: { selected: nextSelected, details }
+            };
         });
     };
 
-    const addQualificationRow = () => {
+    const handleQualificationDetailChange = (level, field, value) => {
         setLeadData(prev => ({
             ...prev,
-            qualifications: [...(prev.qualifications || []), { ...DEFAULT_QUALIFICATION_ROW }]
+            qualifications: {
+                ...prev.qualifications,
+                details: {
+                    ...prev.qualifications.details,
+                    [level]: {
+                        ...prev.qualifications.details[level],
+                        [field]: value
+                    }
+                }
+            }
         }));
     };
 
-    const removeQualificationRow = (index) => {
+    const handleSubjectRowChange = (level, index, field, value) => {
+        setLeadData(prev => {
+            const subjects = [...(prev.qualifications.details[level]?.subjects || [])];
+            subjects[index] = { ...subjects[index], [field]: value };
+            return {
+                ...prev,
+                qualifications: {
+                    ...prev.qualifications,
+                    details: {
+                        ...prev.qualifications.details,
+                        [level]: { subjects }
+                    }
+                }
+            };
+        });
+    };
+
+    const addSubjectRow = (level) => {
         setLeadData(prev => ({
             ...prev,
-            qualifications: (prev.qualifications || []).length > 1
-                ? prev.qualifications.filter((_, i) => i !== index)
-                : [{ ...DEFAULT_QUALIFICATION_ROW }]
+            qualifications: {
+                ...prev.qualifications,
+                details: {
+                    ...prev.qualifications.details,
+                    [level]: {
+                        subjects: [...(prev.qualifications.details[level]?.subjects || []), emptySubjectRow()]
+                    }
+                }
+            }
         }));
+    };
+
+    const removeSubjectRow = (level, index) => {
+        setLeadData(prev => {
+            const subjects = prev.qualifications.details[level]?.subjects || [];
+            const next = subjects.length > 1
+                ? subjects.filter((_, i) => i !== index)
+                : [emptySubjectRow()];
+            return {
+                ...prev,
+                qualifications: {
+                    ...prev.qualifications,
+                    details: {
+                        ...prev.qualifications.details,
+                        [level]: { subjects: next }
+                    }
+                }
+            };
+        });
     };
 
     const handleAdmissionTestChange = (testKey, field, value) => {
@@ -464,6 +694,7 @@ export default function EditLead() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (viewOnly) return;
         setSaving(true);
         setError('');
         try {
@@ -477,13 +708,14 @@ export default function EditLead() {
                     address: leadData.address,
                     interest: leadData.interest,
                     program: leadData.program,
+                    instituteName: leadData.institute_name,
                     counsellorNotes: leadData.comments,
                     comments: leadData.comments,
                     status: leadData.status,
                     countriesOfInterest: leadData.countries_of_interest,
                     countriesOther: leadData.countries_other,
                     course: leadData.course,
-                    qualifications: leadData.qualifications,
+                    qualifications: buildQualificationsForApi(leadData.qualifications),
                     referredBy: leadData.referred_by,
                     admissionTests: leadData.admission_tests
                 })
@@ -615,18 +847,18 @@ export default function EditLead() {
 
     if (loading) {
         return (
-            <>
+            <ViewModeWrap viewOnly={viewOnly}>
                 <Sidebar />
                 <div className="main-content" id="mainContent">
                     <Header />
                     <div style={{ textAlign: 'center', padding: '40px' }}><p>Loading lead data...</p></div>
                 </div>
-            </>
+            </ViewModeWrap>
         );
     }
 
     return (
-        <>
+        <ViewModeWrap viewOnly={viewOnly}>
             <Sidebar />
             <div className="main-content" id="mainContent">
                 <Header />
@@ -635,7 +867,7 @@ export default function EditLead() {
                         <div className="header-left">
                             <h1>
                                 <FontAwesomeIcon icon={faUserPlus} className="page-icon" />
-                                Edit Lead
+                                {viewOnly ? 'Lead Details' : 'Edit Lead'}
                             </h1>
                         </div>
                         <div className="header-right">
@@ -664,7 +896,7 @@ export default function EditLead() {
                             </div>
                             <div className="summary-item">
                                 <span className="summary-label">Status:</span>
-                                <span className="lead-id-display">{leadData.status || 'New'}</span>
+                                <span className="lead-id-display">{leadStatusLabel(leadData.status)}</span>
                             </div>
                             <div className="summary-item">
                                 <span className="summary-label">Follow-ups:</span>
@@ -806,15 +1038,27 @@ export default function EditLead() {
 
                                 <div className="col-md-6">
                                     <div className="form-group">
+                                        <label htmlFor="institute_name">School/College/Institute Name</label>
+                                        <input
+                                            type="text"
+                                            id="institute_name"
+                                            name="institute_name"
+                                            className="input-field form-control"
+                                            value={leadData.institute_name || ''}
+                                            onChange={handleInputChange}
+                                            placeholder="Enter school, college, or institute name"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="col-md-6">
+                                    <div className="form-group">
                                         <label htmlFor="status">Lead Status <span className="required">*</span></label>
                                         <select id="status" name="status" className="input-field form-control"
-                                            value={leadData.status} onChange={handleInputChange} required>
-                                            <option value="">Select Status</option>
-                                            <option value="New">New</option>
-                                            <option value="Contacted">Contacted</option>
-                                            <option value="In Progress">In Progress</option>
-                                            <option value="Converted">Converted</option>
-                                            <option value="Closed">Closed</option>
+                                            value={leadData.status || 'new'} onChange={handleInputChange} required>
+                                            {LEAD_STATUS_OPTIONS.map(opt => (
+                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                            ))}
                                         </select>
                                     </div>
                                 </div>
@@ -824,47 +1068,15 @@ export default function EditLead() {
                                     <div className="form-group">
                                         <label className="section-label-orange">
                                             <FontAwesomeIcon icon={faGlobe} style={{ marginRight: '8px' }} />
-                                            Countries of Interest (Multiple Selection)
+                                            Countries of Interest
                                         </label>
-                                        <div className="countries-checkbox-grid">
-                                            {countries.length === 0 ? (
-                                                <p className="countries-loading">Loading countries...</p>
-                                            ) : (
-                                                countries.map((country) => {
-                                                    const countryName = country.country_name;
-                                                    const isSelected = (leadData.countries_of_interest || []).includes(countryName);
-                                                    return (
-                                                        <label
-                                                            key={country.id}
-                                                            className={`country-checkbox-item${isSelected ? ' selected' : ''}`}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={isSelected}
-                                                                onChange={() => handleCountryToggle(countryName)}
-                                                            />
-                                                            <span>{countryName}</span>
-                                                        </label>
-                                                    );
-                                                })
-                                            )}
-                                            <label className={`country-checkbox-item other-country${(leadData.countries_of_interest || []).includes('Other') ? ' selected' : ''}`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={(leadData.countries_of_interest || []).includes('Other')}
-                                                    onChange={() => handleCountryToggle('Other')}
-                                                />
-                                                <span>Other</span>
-                                                <input
-                                                    type="text"
-                                                    className="other-country-input"
-                                                    placeholder="Please specify"
-                                                    value={leadData.countries_other || ''}
-                                                    onChange={(e) => setLeadData(prev => ({ ...prev, countries_other: e.target.value }))}
-                                                    disabled={!(leadData.countries_of_interest || []).includes('Other')}
-                                                />
-                                            </label>
-                                        </div>
+                                        <CountryMultiSelect
+                                            countries={countries}
+                                            selected={leadData.countries_of_interest || []}
+                                            onToggle={handleCountryToggle}
+                                            otherValue={leadData.countries_other || ''}
+                                            onOtherChange={(value) => setLeadData(prev => ({ ...prev, countries_other: value }))}
+                                        />
                                     </div>
                                 </div>
 
@@ -872,52 +1084,96 @@ export default function EditLead() {
                                 <div className="col-md-12">
                                     <div className="form-group">
                                         <label className="section-label-orange">Qualification</label>
-                                        <div className="qualification-table">
-                                            <div className="qualification-header">
-                                                <span>Qualification</span>
-                                                <span>Subject</span>
-                                                <span>Grade</span>
-                                                <span></span>
-                                            </div>
-                                            {(leadData.qualifications || []).map((row, index) => (
-                                                <div key={index} className="qualification-row">
-                                                    <select
-                                                        value={row.qualification || ''}
-                                                        onChange={(e) => handleQualificationChange(index, 'qualification', e.target.value)}
+                                        <p className="qualification-prompt">Which qualification have you done?</p>
+                                        <div className="countries-checkbox-grid qualification-levels-grid">
+                                            {QUALIFICATION_OPTIONS.map(level => {
+                                                const isSelected = (leadData.qualifications?.selected || []).includes(level);
+                                                return (
+                                                    <label
+                                                        key={level}
+                                                        className={`country-checkbox-item${isSelected ? ' selected' : ''}`}
                                                     >
-                                                        <option value="">Select</option>
-                                                        {QUALIFICATION_LEVELS.map(level => (
-                                                            <option key={level} value={level}>{level}</option>
-                                                        ))}
-                                                    </select>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="e.g. Mathematics"
-                                                        value={row.subject || ''}
-                                                        onChange={(e) => handleQualificationChange(index, 'subject', e.target.value)}
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        placeholder="e.g. A*"
-                                                        value={row.grade || ''}
-                                                        onChange={(e) => handleQualificationChange(index, 'grade', e.target.value)}
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        className="qualification-remove-btn"
-                                                        onClick={() => removeQualificationRow(index)}
-                                                        title="Remove row"
-                                                    >
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                                                            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                                        </svg>
-                                                    </button>
-                                                </div>
-                                            ))}
-                                            <button type="button" className="add-subject-btn" onClick={addQualificationRow}>
-                                                + Add Subject
-                                            </button>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() => handleQualificationToggle(level)}
+                                                        />
+                                                        <span>{level}</span>
+                                                    </label>
+                                                );
+                                            })}
                                         </div>
+
+                                        {(leadData.qualifications?.selected || []).map(level => (
+                                            <div key={level} className="qualification-detail-box">
+                                                <h4 className="qualification-detail-title">{level}</h4>
+
+                                                {SUBJECT_GRADE_LEVELS.includes(level) && (
+                                                    <div className="qualification-table">
+                                                        <div className="qualification-header qualification-header-subjects">
+                                                            <span>Subject</span>
+                                                            <span>Grade</span>
+                                                            <span></span>
+                                                        </div>
+                                                        {(leadData.qualifications.details[level]?.subjects || []).map((row, index) => (
+                                                            <div key={index} className="qualification-row qualification-row-subjects">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="e.g. Mathematics"
+                                                                    value={row.subject || ''}
+                                                                    onChange={(e) => handleSubjectRowChange(level, index, 'subject', e.target.value)}
+                                                                />
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="e.g. A*"
+                                                                    value={row.grade || ''}
+                                                                    onChange={(e) => handleSubjectRowChange(level, index, 'grade', e.target.value)}
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    className="qualification-remove-btn"
+                                                                    onClick={() => removeSubjectRow(level, index)}
+                                                                    title="Remove row"
+                                                                >
+                                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                                                        <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                                    </svg>
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                        <button type="button" className="add-subject-btn" onClick={() => addSubjectRow(level)}>
+                                                            + Add Subject
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                {PERCENTAGE_LEVELS.includes(level) && (
+                                                    <div className="qualification-simple-field">
+                                                        <label>Percentage</label>
+                                                        <input
+                                                            type="text"
+                                                            className="input-field form-control"
+                                                            placeholder="e.g. 85%"
+                                                            value={leadData.qualifications.details[level]?.percentage || ''}
+                                                            onChange={(e) => handleQualificationDetailChange(level, 'percentage', e.target.value)}
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {CGPA_LEVELS.includes(level) && (
+                                                    <div className="qualification-simple-field">
+                                                        <label>CGPA / Division</label>
+                                                        <input
+                                                            type="text"
+                                                            className="input-field form-control"
+                                                            placeholder="e.g. 3.5 / First Division"
+                                                            value={leadData.qualifications.details[level]?.cgpaDivision || ''}
+                                                            onChange={(e) => handleQualificationDetailChange(level, 'cgpaDivision', e.target.value)}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
 
@@ -1215,6 +1471,7 @@ export default function EditLead() {
                                         <div style={{ marginBottom: '8px' }}><strong>Email:</strong> {leadData.email || '—'}</div>
                                         <div style={{ marginBottom: '8px' }}><strong>Phone:</strong> {leadData.phone || '—'}</div>
                                         {leadData.course && <div style={{ marginBottom: '8px' }}><strong>Course:</strong> {leadData.course}</div>}
+                                        {leadData.institute_name && <div style={{ marginBottom: '8px' }}><strong>School/College/Institute:</strong> {leadData.institute_name}</div>}
                                         {leadData.address && <div><strong>Address:</strong> {leadData.address}</div>}
                                     </div>
 
@@ -1468,10 +1725,38 @@ export default function EditLead() {
                                             <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '13px' }}>
                                                 <div style={{ fontWeight: 600 }}>Final Amount: PKR {Number(selectedInvoice.final_amount || 0).toLocaleString()}</div>
                                                 <div style={{ color: '#666', marginTop: '4px' }}>
+                                                    Paid: <strong style={{ color: '#16a34a' }}>PKR {Number(selectedInvoice.paid_amount || 0).toLocaleString()}</strong>
+                                                    {' · '}Remaining: <strong style={{ color: '#ea580c' }}>
+                                                        PKR {Math.max(0, Number(selectedInvoice.final_amount || 0) - Number(selectedInvoice.paid_amount || 0)).toLocaleString()}
+                                                    </strong>
+                                                    {' · '}Installments: <strong>{invoicePayments.length}</strong>
+                                                </div>
+                                                <div style={{ color: '#666', marginTop: '4px' }}>
                                                     Lead status: <strong>{paymentStatus}</strong>
                                                     {' '}(from invoice: {selectedInvoice.payment_status})
                                                 </div>
                                             </div>
+                                            {invoicePayments.length > 0 && (
+                                                <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', marginBottom: '16px' }}>
+                                                    {invoicePayments.map((p, idx) => (
+                                                        <div key={p.id} style={{
+                                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                            padding: '8px 12px', borderBottom: idx < invoicePayments.length - 1 ? '1px solid #f0f0f0' : 'none',
+                                                            fontSize: '12px'
+                                                        }}>
+                                                            <span>#{idx + 1} — {p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                                                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                <strong style={{ color: '#16a34a' }}>PKR {Number(p.amount || 0).toLocaleString()}</strong>
+                                                                <button type="button" title="View Receipt"
+                                                                    onClick={() => navigate(`/payment-receipt/${selectedInvoice.id}/${p.id}`)}
+                                                                    style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '6px', padding: '4px 6px', cursor: 'pointer' }}>
+                                                                    <FontAwesomeIcon icon={faReceipt} />
+                                                                </button>
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                             <div className="row g-3">
                                                 <div className="col-md-4">
                                                     <label className="form-label" style={{ fontSize: '13px', fontWeight: '600' }}>Payment Status</label>
@@ -1485,10 +1770,10 @@ export default function EditLead() {
                                                     </select>
                                                 </div>
                                                 <div className="col-md-4">
-                                                    <label className="form-label" style={{ fontSize: '13px', fontWeight: '600' }}>Amount Paid (PKR)</label>
+                                                    <label className="form-label" style={{ fontSize: '13px', fontWeight: '600' }}>This Installment (PKR)</label>
                                                     <input type="number" className="form-control" style={{ marginBottom: 0 }}
-                                                        placeholder="0.00" value={paymentForm.paidAmount}
-                                                        onChange={e => setPaymentForm({ ...paymentForm, paidAmount: e.target.value })} />
+                                                        placeholder="0.00" value={paymentForm.installmentAmount}
+                                                        onChange={e => setPaymentForm({ ...paymentForm, installmentAmount: e.target.value })} />
                                                 </div>
                                                 <div className="col-md-4">
                                                     <label className="form-label" style={{ fontSize: '13px', fontWeight: '600' }}>Payment Date</label>
@@ -1497,12 +1782,29 @@ export default function EditLead() {
                                                         onChange={e => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} />
                                                 </div>
                                             </div>
-                                            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                                            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                                {['Paid', 'Partially Paid'].includes(selectedInvoice.payment_status) && Number(selectedInvoice.paid_amount) > 0 && (
+                                                    <button type="button" className="btn-secondary"
+                                                        onClick={() => {
+                                                            if (invoicePayments.length === 1) {
+                                                                navigate(`/payment-receipt/${selectedInvoice.id}/${invoicePayments[0].id}`);
+                                                            } else if (invoicePayments.length > 1) {
+                                                                navigate(`/payment-receipt/${selectedInvoice.id}/${invoicePayments[invoicePayments.length - 1].id}`);
+                                                            } else {
+                                                                navigate(`/payment-receipt/${selectedInvoice.id}`);
+                                                            }
+                                                        }}>
+                                                        <FontAwesomeIcon icon={faReceipt} style={{ marginRight: '6px' }} />
+                                                        View Receipt
+                                                    </button>
+                                                )}
                                                 <button type="button" className="btn-primary"
                                                     onClick={handleUpdateInvoicePayment}
                                                     disabled={updatingPayment}>
                                                     <FontAwesomeIcon icon={faCheckCircle} style={{ marginRight: '8px' }} />
-                                                    {updatingPayment ? 'Saving…' : 'Update Payment'}
+                                                    {updatingPayment
+                                                        ? 'Saving…'
+                                                        : (parseFloat(paymentForm.installmentAmount) > 0 ? 'Record Payment' : 'Update Status')}
                                                 </button>
                                             </div>
                                         </>
@@ -1548,6 +1850,6 @@ export default function EditLead() {
                     </div>
                 </>
             )}
-        </>
+        </ViewModeWrap>
     );
 }

@@ -1,0 +1,404 @@
+.date-range-filter {
+    position: relative;
+    width: 320px;
+    min-width: 320px;
+    height: 42px;
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+}
+
+.logs-filters .date-range-filter,
+.leads-filters .date-range-filter {
+    flex: 0 0 320px;
+    width: 320px;
+    min-width: 320px;
+    height: 42px;
+}
+
+.page-toolbar .date-range-filter {
+    width: 320px;
+    min-width: 320px;
+}
+
+.date-range-trigger {
+    width: 100%;
+    height: 42px;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #333333;
+    font-size: 14px;
+    line-height: 1;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.date-range-trigger:hover {
+    border-color: #d1d5db;
+}
+
+.date-range-trigger.is-open,
+.date-range-trigger.has-value {
+    border-color: var(--primary-color, #F47B20);
+}
+
+.date-range-trigger.is-open {
+    box-shadow: 0 0 0 3px rgba(244, 123, 32, 0.12);
+}
+
+.date-range-trigger-icon {
+    color: #9ca3af;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.date-range-trigger.has-value .date-range-trigger-icon {
+    color: var(--primary-color, #F47B20);
+}
+
+.date-range-trigger-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.date-range-placeholder {
+    color: #9ca3af;
+}
+
+.date-range-value {
+    color: #111827;
+    font-weight: 500;
+}
+
+.date-range-trigger-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.date-range-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: #f3f4f6;
+    color: #6b7280;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 10px;
+}
+
+.date-range-clear:hover {
+    background: #e5e7eb;
+    color: #111827;
+}
+
+.date-range-chevron {
+    color: #9ca3af;
+    font-size: 11px;
+}
+
+.date-range-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 1200;
+    width: 320px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+    padding: 14px;
+}
+
+.date-range-dropdown.align-left {
+    right: auto;
+    left: 0;
+}
+
+.date-range-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.date-range-month-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.date-range-nav {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 8px;
+    cursor: pointer;
+    color: #374151;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.date-range-nav:hover {
+    border-color: var(--primary-color, #F47B20);
+    color: var(--primary-color, #F47B20);
+}
+
+.date-range-weekdays,
+.date-range-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.date-range-weekdays span {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #9ca3af;
+    padding: 6px 0;
+}
+
+.date-range-day {
+    height: 34px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #111827;
+    cursor: pointer;
+    position: relative;
+}
+
+.date-range-day.is-outside {
+    color: #d1d5db;
+}
+
+.date-range-day.is-in-range {
+    background: rgba(244, 123, 32, 0.12);
+    border-radius: 0;
+}
+
+.date-range-day.is-range-start {
+    background: var(--primary-color, #F47B20);
+    color: #fff;
+    font-weight: 700;
+    border-radius: 8px 0 0 8px;
+}
+
+.date-range-day.is-range-end {
+    background: var(--primary-color, #F47B20);
+    color: #fff;
+    font-weight: 700;
+    border-radius: 0 8px 8px 0;
+}
+
+.date-range-day.is-range-start.is-range-end {
+    border-radius: 8px;
+}
+
+.date-range-day.is-today:not(.is-range-start):not(.is-range-end) {
+    box-shadow: inset 0 0 0 1px var(--primary-color, #F47B20);
+}
+
+.date-range-day:hover:not(.is-range-start):not(.is-range-end) {
+    background: #fff7ed;
+}
+
+.date-range-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.date-range-preset {
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    color: #374151;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.date-range-preset:hover,
+.date-range-preset.is-active {
+    border-color: var(--primary-color, #F47B20);
+    color: var(--primary-color, #F47B20);
+    background: #fff7ed;
+}
+
+.date-range-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f3f4f6;
+}
+
+.date-range-hint {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.date-range-apply {
+    border: none;
+    background: var(--primary-color, #F47B20);
+    color: #fff;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.date-range-apply:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.page-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.page-toolbar .page-search {
+    flex: 1;
+    min-width: 240px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 42px;
+}
+
+.page-toolbar .page-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 0;
+    bottom: 0;
+    display: block;
+    width: 16px;
+    height: 14px;
+    margin: auto 0;
+    color: #9ca3af;
+    font-size: 14px;
+    line-height: 1;
+    pointer-events: none;
+    transform: none !important;
+}
+
+.page-toolbar .page-search-input {
+    width: 100%;
+    height: 42px;
+    margin: 0;
+    padding: 0 40px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #333333;
+    font-size: 14px;
+    line-height: normal;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.page-toolbar .page-search-input:focus {
+    outline: none;
+    border-color: var(--primary-color, #F47B20);
+}
+
+.page-toolbar .page-search-clear {
+    position: absolute;
+    right: 12px;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    height: 20px;
+    margin: auto 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #9ca3af;
+    padding: 0;
+    transform: none;
+}
+
+.logs-filters,
+.leads-filters {
+    align-items: center;
+}
+
+.logs-filters .search-box,
+.leads-filters .search-box {
+    display: flex;
+    align-items: center;
+    height: 42px;
+}
+
+.logs-filters .search-box .input-field,
+.leads-filters .search-box .input-field,
+.logs-filters .filter-group .input-field,
+.leads-filters .filter-group .input-field {
+    height: 42px;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: normal;
+    box-sizing: border-box;
+}
+
+.logs-filters .search-icon,
+.leads-filters .search-icon {
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    display: block;
+    width: 14px;
+    height: 14px;
+    margin: auto 0;
+    font-size: 14px;
+    line-height: 1;
+    pointer-events: none;
+    transform: none !important;
+}
+
+@media (max-width: 768px) {
+    .date-range-filter {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .date-range-dropdown {
+        width: 100%;
+        right: 0;
+        left: 0;
+    }
+}

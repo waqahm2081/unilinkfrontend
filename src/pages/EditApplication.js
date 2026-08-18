@@ -4,14 +4,16 @@ import '../styles/dashboard.css';
 import '../styles/applications.css';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
+import { ViewModeWrap } from '../components/ViewRecordModal';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faFileAlt, faSave, faTimes, faFileUpload, faUpload, faDownload, faTrash, faEnvelopeOpen } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
-export default function EditApplication() {
+export default function EditApplication({ recordId, viewOnly = false } = {}) {
   const navigate = useNavigate();
-  const { id } = useParams();
+  const { id: paramId } = useParams();
+  const id = recordId || paramId;
   const [loading, setLoading] = useState(false);
   const [fetchingData, setFetchingData] = useState(true);
   const [formData, setFormData] = useState({
@@ -156,6 +158,7 @@ export default function EditApplication() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (viewOnly) return;
     if (!formData.studentId || !formData.countryId || !formData.universityId || !formData.intakeId || !formData.program) {
       alert('Please fill in all required fields');
       return;
@@ -236,13 +239,13 @@ export default function EditApplication() {
 
   if (fetchingData) {
     return (
-      <>
+      <ViewModeWrap viewOnly={viewOnly}>
         <Sidebar />
         <div className="main-content" id="mainContent">
           <Header />
           <div style={{ textAlign: 'center', padding: '40px' }}><p>Loading application data...</p></div>
         </div>
-      </>
+      </ViewModeWrap>
     );
   }
 
@@ -254,7 +257,7 @@ export default function EditApplication() {
   });
 
   return (
-    <>
+    <ViewModeWrap viewOnly={viewOnly}>
       <Sidebar />
       <div className="main-content" id="mainContent">
         <Header />
@@ -263,7 +266,7 @@ export default function EditApplication() {
           <div className="form-header" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
             <h1 style={{ flex: 1 }}>
               <FontAwesomeIcon icon={faFileAlt} className="page-icon" />
-              Edit Application
+              {viewOnly ? 'Application Details' : 'Edit Application'}
             </h1>
             <button type="button" className="btn-secondary" onClick={() => openUpload('manual')}>
               <FontAwesomeIcon icon={faFileUpload} /> Upload Manual Form
@@ -510,6 +513,6 @@ export default function EditApplication() {
           </div>
         </>
       )}
-    </>
+    </ViewModeWrap>
   );
 }

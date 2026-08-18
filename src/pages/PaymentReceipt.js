@@ -7,6 +7,8 @@ import {
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
+const CURRENCY_SYMBOLS = { PKR: '₨', USD: '$', GBP: '£', EUR: '€' };
+
 const fmt = (n, decimals = 2) =>
   parseFloat(n || 0).toLocaleString('en-PK', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
@@ -18,12 +20,14 @@ const fmtDate = (d) => {
 };
 
 export default function PaymentReceipt() {
-  const { invoiceId } = useParams();
+  const { invoiceId, paymentId } = useParams();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [invoice, setInvoice] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [selectedPayment, setSelectedPayment] = useState(null);
 
   useEffect(() => {
     const fetchInvoice = async () => {
@@ -32,6 +36,30 @@ export default function PaymentReceipt() {
         const json = await res.json();
         if (json.success && json.invoice) {
           setInvoice(json.invoice);
+          const list = Array.isArray(json.payments) ? json.payments : [];
+          setPayments(list);
+
+          if (paymentId) {
+            const match = list.find(p => String(p.id) === String(paymentId));
+            if (!match) {
+              setError('Payment installment not found for this invoice');
+              return;
+            }
+            setSelectedPayment(match);
+          } else if (list.length === 1) {
+            setSelectedPayment(list[0]);
+          } else if (list.length === 0 && parseFloat(json.invoice.paid_amount) > 0) {
+            // Legacy fallback: no history rows yet
+            setSelectedPayment({
+              id: null,
+              amount: json.invoice.paid_amount,
+              payment_date: json.invoice.payment_date,
+              notes: null
+            });
+          } else if (list.length > 1) {
+            // Show latest installment if no specific payment selected
+            setSelectedPayment(list[list.length - 1]);
+          }
         } else {
           setError(json.message || 'Invoice not found');
         }
@@ -42,7 +70,7 @@ export default function PaymentReceipt() {
       }
     };
     fetchInvoice();
-  }, [invoiceId]);
+  }, [invoiceId, paymentId]);
 
   const handlePrint = () => window.print();
 
@@ -86,9 +114,42 @@ export default function PaymentReceipt() {
     : (isManual ? (invoice.manual_student_mobile || invoice.student_mobile) : (invoice.student_mobile || null));
 
   const finalAmount = parseFloat(invoice.final_amount) || 0;
-  const paidAmount = parseFloat(invoice.paid_amount) || 0;
-  const remaining = Math.max(0, finalAmount - paidAmount);
-  const pkrSymbol = '₨';
+  const totalPaid = parseFloat(invoice.paid_amount) || 0;
+  const installmentAmount = parseFloat(selectedPayment?.amount) || totalPaid;
+  const installmentIndex = selectedPayment?.id
+    ? payments.findIndex(p => String(p.id) === String(selectedPayment.id)) + 1
+    : (payments.length || 1);
+  // Remaining after this installment (based on cumulative payments up to this one)
+  let paidUpToThis = installmentAmount;
+  if (selectedPayment?.id && payments.length) {
+    paidUpToThis = 0;
+    for (const p of payments) {
+      paidUpToThis += parseFloat(p.amount) || 0;
+      if (String(p.id) === String(selectedPayment.id)) break;
+    }
+  }
+  const remainingAfter = Math.max(0, finalAmount - paidUpToThis);
+
+  const currency      = invoice.selected_currency || 'PKR';
+  const isPKR         = currency === 'PKR';
+  const currSymbol    = CURRENCY_SYMBOLS[currency] || currency;
+  const pkrSymbol     = '₨';
+  const exchangeRate  = parseFloat(invoice.exchange_rate) || 1;
+  const showConverted = !isPKR && invoice.show_converted_currency !== 0 && invoice.show_converted_currency !== false && exchangeRate > 0;
+  const toForeign     = (pkr) => exchangeRate > 0 ? parseFloat(pkr || 0) / exchangeRate : 0;
+
+  const AmountCell = ({ pkr, color, size = '13px', weight = 700 }) => (
+    <div style={{ textAlign: 'right' }}>
+      <div style={{ fontWeight: weight, fontSize: size, color: color || '#1a1a1a' }}>
+        {pkrSymbol} {fmt(pkr)}
+      </div>
+      {showConverted && (
+        <div style={{ fontSize: '11px', color: '#888', fontWeight: 600, marginTop: '1px' }}>
+          {currSymbol} {fmt(toForeign(pkr))} {currency}
+        </div>
+      )}
+    </div>
+  );
 
   const printStyles = `
     @media print {
@@ -117,7 +178,27 @@ export default function PaymentReceipt() {
         <div style={{ flex: 1, color: '#ccc', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <FontAwesomeIcon icon={faReceipt} style={{ color: '#F47B20' }} />
           Payment Receipt — #{invoice.invoice_id}
+          {payments.length > 1 && selectedPayment?.id && (
+            <span style={{ color: '#F47B20' }}>· Installment #{installmentIndex}</span>
+          )}
         </div>
+        {payments.length > 1 && (
+          <select
+            value={selectedPayment?.id || ''}
+            onChange={(e) => navigate(`/payment-receipt/${invoiceId}/${e.target.value}`)}
+            style={{
+              background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '8px',
+              padding: '7px 10px', fontSize: '12px'
+            }}
+          >
+            {payments.map((p, idx) => (
+              <option key={p.id} value={p.id}>
+                Installment #{idx + 1} — {fmtDate(p.payment_date)} — ₨ {fmt(p.amount)}
+                {showConverted ? ` (≈ ${currSymbol}${fmt(toForeign(p.amount))})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
         <button onClick={handlePrint} style={{
           background: '#F47B20', border: 'none', color: '#fff', padding: '8px 20px',
           borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700,
@@ -139,6 +220,16 @@ export default function PaymentReceipt() {
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: '18px', fontWeight: 800, color: '#1a1a1a' }}>Payment Receipt</div>
               <div style={{ fontSize: '12px', color: '#F47B20', fontWeight: 700 }}>#{invoice.invoice_id}</div>
+              {!isPKR && (
+                <div style={{ fontSize: '10px', color: '#888', marginTop: '2px' }}>
+                  {showConverted ? `Shown in PKR and ${currency}` : 'Shown in PKR only'}
+                </div>
+              )}
+              {payments.length > 0 && (
+                <div style={{ fontSize: '11px', color: '#888', marginTop: '2px' }}>
+                  Installment #{installmentIndex} of {payments.length || 1}
+                </div>
+              )}
             </div>
           </div>
 
@@ -167,20 +258,22 @@ export default function PaymentReceipt() {
             background: '#f9f9f9', borderRadius: '10px', padding: '16px 18px',
             border: '1px solid #eee', marginBottom: '16px'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px', fontSize: '13px' }}>
               <span style={{ color: '#666' }}>Invoice Total</span>
-              <span style={{ fontWeight: 700 }}>{pkrSymbol} {fmt(finalAmount)}</span>
+              <AmountCell pkr={finalAmount} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
-              <span style={{ color: '#666' }}>Amount Paid</span>
-              <span style={{ fontWeight: 800, color: '#2E7D32', fontSize: '15px' }}>{pkrSymbol} {fmt(paidAmount)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px', fontSize: '13px' }}>
+              <span style={{ color: '#666' }}>This Installment</span>
+              <AmountCell pkr={installmentAmount} color="#2E7D32" size="15px" weight={800} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px', fontSize: '13px' }}>
+              <span style={{ color: '#666' }}>Total Paid (to date)</span>
+              <AmountCell pkr={paidUpToThis} />
             </div>
             <div style={{ height: '1px', background: '#e5e7eb', margin: '8px 0 12px' }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '13px' }}>
               <span style={{ color: '#666' }}>Amount Remaining</span>
-              <span style={{ fontWeight: 800, color: remaining > 0 ? '#E65100' : '#2E7D32', fontSize: '15px' }}>
-                {pkrSymbol} {fmt(remaining)}
-              </span>
+              <AmountCell pkr={remainingAfter} color={remainingAfter > 0 ? '#E65100' : '#2E7D32'} size="15px" weight={800} />
             </div>
           </div>
 
@@ -189,15 +282,38 @@ export default function PaymentReceipt() {
               <div style={{ fontSize: '10px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '4px' }}>
                 Payment Date
               </div>
-              <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>{fmtDate(invoice.payment_date)}</div>
+              <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>
+                {fmtDate(selectedPayment?.payment_date || invoice.payment_date)}
+              </div>
             </div>
             <div style={{ background: '#E3F2FD', borderRadius: '8px', padding: '12px 14px', border: '1px solid #90CAF9' }}>
               <div style={{ fontSize: '10px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '4px' }}>
                 Status
               </div>
-              <div style={{ fontWeight: 700, fontSize: '14px', color: '#1565C0' }}>{invoice.payment_status || '—'}</div>
+              <div style={{ fontWeight: 700, fontSize: '14px', color: '#1565C0' }}>
+                {remainingAfter > 0 ? 'Partially Paid' : (invoice.payment_status || 'Paid')}
+              </div>
             </div>
           </div>
+
+          {payments.length > 1 && (
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '10px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '8px' }}>
+                Installment Summary
+              </div>
+              {payments.map((p, idx) => (
+                <div key={p.id} style={{
+                  display: 'flex', justifyContent: 'space-between', fontSize: '12px',
+                  padding: '4px 0', borderBottom: '1px dashed #eee',
+                  fontWeight: selectedPayment?.id === p.id ? 700 : 400,
+                  color: selectedPayment?.id === p.id ? '#1a1a1a' : '#666'
+                }}>
+                  <span>#{idx + 1} · {fmtDate(p.payment_date)}</span>
+                  <AmountCell pkr={p.amount} color={selectedPayment?.id === p.id ? '#1a1a1a' : '#666'} size="12px" weight={selectedPayment?.id === p.id ? 700 : 400} />
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ height: '1px', background: '#e5e7eb', margin: '8px 0 12px' }} />
           <div style={{ textAlign: 'center', fontSize: '11px', color: '#aaa' }}>

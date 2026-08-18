@@ -3,16 +3,21 @@ import '../styles/dashboard.css'
 import '../styles/students.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import PrintReportButton from '../components/PrintReportButton'
+import DateRangeFilter from '../components/DateRangeFilter'
+import ViewRecordModal from '../components/ViewRecordModal'
+import EditStudent from './EditStudent'
+import ListPagination from '../components/ListPagination'
+import useListPagination from '../hooks/useListPagination'
+import { EMPTY_DATE_RANGE, hasDateRange, isDateInRange } from '../utils/dateRange'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faUsers, faPlus, faEdit, faTrash, faSearch, faChevronDown, faTimes, faArrowLeft, faUserTie,
-  faChevronLeft, faChevronRight, faKey, faCheckCircle, faExclamationTriangle
+  faKey, faCheckCircle, faExclamationTriangle, faEye
 } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
-
-const PAGE_SIZE = 15;
 
 const getStatusBadgeStyle = (status) => {
     const styles = {
@@ -32,6 +37,7 @@ const getStatusBadgeStyle = (status) => {
 
 export default function Students() {
     const [students, setStudents] = useState([]);
+    const [viewRecordId, setViewRecordId] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -50,8 +56,7 @@ export default function Students() {
     const [credentialsData, setCredentialsData] = useState(null);
     const [credentialsError, setCredentialsError] = useState('');
 
-    // Pagination
-    const [currentPage, setCurrentPage] = useState(1);
+    const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
 
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
@@ -64,11 +69,6 @@ export default function Students() {
             fetchStudents();
         }
     }, [counselorId]);
-
-    // Reset to page 1 whenever filters or search changes
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm, columnFilters]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -202,6 +202,7 @@ export default function Students() {
         setColumnFilters({ fullName: [], country: [], course: [], status: [] });
         setFilterSearch({ fullName: '', country: '', course: '', status: '' });
         setSearchTerm('');
+        setDateRange(EMPTY_DATE_RANGE);
     };
 
     const filteredStudents = students.filter(s => {
@@ -215,39 +216,21 @@ export default function Students() {
         if (columnFilters.country.length > 0 && !columnFilters.country.includes(s.country)) return false;
         if (columnFilters.course.length > 0 && !columnFilters.course.includes(s.course)) return false;
         if (columnFilters.status.length > 0 && !columnFilters.status.includes(s.status)) return false;
+        if (hasDateRange(dateRange) && !isDateInRange(s.created_at, dateRange.from, dateRange.to)) return false;
         return true;
     });
 
-    // Pagination calculations
-    const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
-    const safeCurrentPage = Math.min(currentPage, totalPages);
-    const paginatedStudents = filteredStudents.slice(
-        (safeCurrentPage - 1) * PAGE_SIZE,
-        safeCurrentPage * PAGE_SIZE
+    const {
+        paginatedItems: paginatedStudents,
+        totalPages,
+        currentPage: safeCurrentPage,
+        goToPage,
+    } = useListPagination(
+        filteredStudents,
+        [searchTerm, JSON.stringify(columnFilters), dateRange.from, dateRange.to, counselorId].join('|')
     );
 
-    const goToPage = (page) => {
-        const p = Math.max(1, Math.min(page, totalPages));
-        setCurrentPage(p);
-    };
-
-    // Build page number list with ellipsis
-    const getPageNumbers = () => {
-        if (totalPages <= 7) {
-            return Array.from({ length: totalPages }, (_, i) => i + 1);
-        }
-        const pages = [];
-        if (safeCurrentPage <= 4) {
-            pages.push(1, 2, 3, 4, 5, '...', totalPages);
-        } else if (safeCurrentPage >= totalPages - 3) {
-            pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
-        } else {
-            pages.push(1, '...', safeCurrentPage - 1, safeCurrentPage, safeCurrentPage + 1, '...', totalPages);
-        }
-        return pages;
-    };
-
-    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim();
+    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || hasDateRange(dateRange);
 
     const FilterDropdown = ({ column, label }) => {
         const triggerRef = useRef(null);
@@ -319,6 +302,20 @@ export default function Students() {
         );
     };
 
+    const printColumns = [
+        { header: 'Registered ID', value: (r) => r.student_id },
+        { header: 'Full Name', value: (r) => getFullName(r) },
+        { header: 'Contact No', value: (r) => r.mobile || '-' },
+        { header: 'Email', value: (r) => r.email },
+        { header: 'Country', value: (r) => r.country || '-' },
+        { header: 'Course', value: (r) => r.course || '-' },
+        { header: 'Status', value: (r) => r.status },
+        {
+            header: 'Registered Date',
+            value: (r) => (r.created_at ? new Date(r.created_at).toLocaleDateString() : '-'),
+        },
+    ];
+
     return (
         <>
             <Sidebar />
@@ -371,6 +368,12 @@ export default function Students() {
                             </h1>
                         </div>
                         <div className="header-right">
+                            <PrintReportButton
+                                show={hasActiveFilters}
+                                title="Students Management"
+                                columns={printColumns}
+                                rows={filteredStudents}
+                            />
                             {hasActiveFilters && (
                                 <button className="btn-clear-all-filters" onClick={clearAllFilters}>
                                     <FontAwesomeIcon icon={faTimes} /> Clear All Filters
@@ -390,22 +393,27 @@ export default function Students() {
                         </div>
                     )}
 
-                    {/* Search Bar */}
-                    <div style={{ marginBottom: '16px', position: 'relative' }}>
-                        <FontAwesomeIcon icon={faSearch} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: '14px' }} />
-                        <input
-                            type="text"
-                            className="form-control"
-                            placeholder="Search students by name, email, mobile or ID..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            style={{ paddingLeft: '40px', borderRadius: '10px', border: '1px solid #e5e7eb', height: '42px' }}
+                    <div className="page-toolbar">
+                        <div className="page-search">
+                            <FontAwesomeIcon icon={faSearch} className="page-search-icon" />
+                            <input
+                                type="text"
+                                className="page-search-input"
+                                placeholder="Search students by name, email, mobile or ID..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                            {searchTerm && (
+                                <button type="button" className="page-search-clear" onClick={() => setSearchTerm('')}>
+                                    <FontAwesomeIcon icon={faTimes} />
+                                </button>
+                            )}
+                        </div>
+                        <DateRangeFilter
+                            label="Registered Date"
+                            value={dateRange}
+                            onChange={setDateRange}
                         />
-                        {searchTerm && (
-                            <button onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>
-                                <FontAwesomeIcon icon={faTimes} />
-                            </button>
-                        )}
                     </div>
 
                     {loading ? (
@@ -423,6 +431,7 @@ export default function Students() {
                                             <th><FilterDropdown column="country" label="Country" /></th>
                                             <th><FilterDropdown column="course" label="Course" /></th>
                                             <th><FilterDropdown column="status" label="Status" /></th>
+                                            <th>Registered Date</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -433,7 +442,11 @@ export default function Students() {
                                                 return (
                                                     <tr key={student.id}>
                                                         <td><span className="student-id">{student.student_id}</span></td>
-                                                        <td><strong>{getFullName(student)}</strong></td>
+                                                        <td>
+                                                            <Link to={`/edit-student/${student.id}`} className="table-name-link">
+                                                                {getFullName(student)}
+                                                            </Link>
+                                                        </td>
                                                         <td>{student.mobile || '-'}</td>
                                                         <td>{student.email}</td>
                                                         <td>{student.country || '-'}</td>
@@ -447,7 +460,20 @@ export default function Students() {
                                                             </span>
                                                         </td>
                                                         <td>
+                                                            {student.created_at
+                                                                ? new Date(student.created_at).toLocaleDateString()
+                                                                : '-'}
+                                                        </td>
+                                                        <td>
                                                             <div className="action-buttons">
+                                                                <button
+                                                                    type="button"
+                                                                    className="btn-icon btn-view"
+                                                                    title="View Student"
+                                                                    onClick={() => setViewRecordId(student.id)}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faEye} />
+                                                                </button>
                                                                 <button
                                                                     className="btn-icon btn-credentials"
                                                                     title="View Login Credentials"
@@ -468,7 +494,7 @@ export default function Students() {
                                             })
                                         ) : (
                                             <tr>
-                                                <td colSpan="8" style={{ textAlign: 'center', padding: '40px' }}>
+                                                <td colSpan="9" style={{ textAlign: 'center', padding: '40px' }}>
                                                     {hasActiveFilters
                                                         ? 'No students match the selected filters'
                                                         : counselorId
@@ -481,83 +507,13 @@ export default function Students() {
                                 </table>
                             </div>
 
-                            {/* Pagination */}
-                            {filteredStudents.length > 0 && (
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                    marginTop: '20px', flexWrap: 'wrap', gap: '12px'
-                                }}>
-                                    {/* Results info */}
-                                    <div style={{ fontSize: '13px', color: '#6b7280' }}>
-                                        Showing <strong>{(safeCurrentPage - 1) * PAGE_SIZE + 1}</strong>–<strong>{Math.min(safeCurrentPage * PAGE_SIZE, filteredStudents.length)}</strong> of <strong>{filteredStudents.length}</strong> student{filteredStudents.length !== 1 ? 's' : ''}
-                                    </div>
-
-                                    {/* Page controls */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        {/* Previous */}
-                                        <button
-                                            onClick={() => goToPage(safeCurrentPage - 1)}
-                                            disabled={safeCurrentPage === 1}
-                                            style={{
-                                                display: 'flex', alignItems: 'center', gap: '6px',
-                                                padding: '7px 14px', borderRadius: '8px', border: '1px solid #e5e7eb',
-                                                background: safeCurrentPage === 1 ? '#f9fafb' : 'white',
-                                                color: safeCurrentPage === 1 ? '#9ca3af' : '#374151',
-                                                cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
-                                                fontSize: '13px', fontWeight: '500', transition: 'all 0.15s'
-                                            }}
-                                        >
-                                            <FontAwesomeIcon icon={faChevronLeft} style={{ fontSize: '11px' }} />
-                                            Previous
-                                        </button>
-
-                                        {/* Page numbers */}
-                                        {getPageNumbers().map((page, idx) =>
-                                            page === '...'
-                                                ? (
-                                                    <span key={`ellipsis-${idx}`} style={{
-                                                        padding: '7px 4px', color: '#9ca3af', fontSize: '13px', userSelect: 'none'
-                                                    }}>
-                                                        …
-                                                    </span>
-                                                )
-                                                : (
-                                                    <button
-                                                        key={page}
-                                                        onClick={() => goToPage(page)}
-                                                        style={{
-                                                            width: '36px', height: '36px', borderRadius: '8px',
-                                                            border: safeCurrentPage === page ? '2px solid #F47B20' : '1px solid #e5e7eb',
-                                                            background: safeCurrentPage === page ? '#F47B20' : 'white',
-                                                            color: safeCurrentPage === page ? 'white' : '#374151',
-                                                            cursor: 'pointer', fontSize: '13px', fontWeight: '600',
-                                                            transition: 'all 0.15s'
-                                                        }}
-                                                    >
-                                                        {page}
-                                                    </button>
-                                                )
-                                        )}
-
-                                        {/* Next */}
-                                        <button
-                                            onClick={() => goToPage(safeCurrentPage + 1)}
-                                            disabled={safeCurrentPage === totalPages}
-                                            style={{
-                                                display: 'flex', alignItems: 'center', gap: '6px',
-                                                padding: '7px 14px', borderRadius: '8px', border: '1px solid #e5e7eb',
-                                                background: safeCurrentPage === totalPages ? '#f9fafb' : 'white',
-                                                color: safeCurrentPage === totalPages ? '#9ca3af' : '#374151',
-                                                cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
-                                                fontSize: '13px', fontWeight: '500', transition: 'all 0.15s'
-                                            }}
-                                        >
-                                            Next
-                                            <FontAwesomeIcon icon={faChevronRight} style={{ fontSize: '11px' }} />
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
+                            <ListPagination
+                                total={filteredStudents.length}
+                                currentPage={safeCurrentPage}
+                                totalPages={totalPages}
+                                onPageChange={goToPage}
+                                itemLabel="student"
+                            />
                         </>
                     )}
                 </div>
@@ -638,6 +594,11 @@ export default function Students() {
                         </div>
                     </div>
                 </>
+            )}
+            {viewRecordId && (
+                <ViewRecordModal title="View Student" onClose={() => setViewRecordId(null)}>
+                    <EditStudent recordId={viewRecordId} viewOnly />
+                </ViewRecordModal>
             )}
         </>
     );

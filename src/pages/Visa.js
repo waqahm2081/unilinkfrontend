@@ -3,10 +3,17 @@ import '../styles/dashboard.css'
 import '../styles/visa.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import PrintReportButton from '../components/PrintReportButton'
+import DateRangeFilter from '../components/DateRangeFilter'
+import ViewRecordModal from '../components/ViewRecordModal'
+import EditVisa from './EditVisa'
+import ListPagination from '../components/ListPagination'
+import useListPagination from '../hooks/useListPagination'
+import { EMPTY_DATE_RANGE, hasDateRange, isDateInRange } from '../utils/dateRange'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faPassport, faPlus, faEdit, faTrash, faSearch, faChevronDown, faTimes,
+  faPassport, faPlus, faEdit, faTrash, faSearch, faChevronDown, faTimes, faEye,
 } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
@@ -41,6 +48,7 @@ const STAT_STATUS_MAP = {
 
 export default function Visa() {
     const [visas, setVisas] = useState([]);
+    const [viewRecordId, setViewRecordId] = useState(null);
     const [statistics, setStatistics] = useState({ total: 0, to_be_applied: 0, in_progress: 0, approved: 0, rejected: 0 });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -49,13 +57,14 @@ export default function Visa() {
     const [activeFilter, setActiveFilter] = useState(null);
     const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
     const [columnFilters, setColumnFilters] = useState({
-        studentName: [], country: [], institute: [], visaType: [], submissionDate: [], submittedBy: [], status: []
+        studentName: [], country: [], institute: [], visaType: [], submittedBy: [], status: []
     });
     const [filterSearch, setFilterSearch] = useState({
-        studentName: '', country: '', institute: '', visaType: '', submissionDate: '', submittedBy: '', status: ''
+        studentName: '', country: '', institute: '', visaType: '', submittedBy: '', status: ''
     });
     // NEW: tracks which stat card is active ('to_be_applied' | 'in_progress' | 'approved' | 'rejected' | null)
     const [statFilter, setStatFilter] = useState(null);
+    const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
 
     useEffect(() => { fetchVisas(); fetchStatistics(); }, []);
 
@@ -117,11 +126,6 @@ export default function Visa() {
                 case 'country':        value = v.student_country; break;
                 case 'institute':      value = v.institute || null; break;
                 case 'visaType':       value = v.visa_type; break;
-                case 'submissionDate':
-                    value = v.submission_date
-                        ? new Date(v.submission_date).toLocaleDateString()
-                        : null;
-                    break;
                 case 'submittedBy':    value = v.submitted_by || null; break;
                 case 'status':         value = v.visa_status; break;
                 default: value = '';
@@ -152,10 +156,11 @@ export default function Visa() {
     };
 
     const clearAllFilters = () => {
-        setColumnFilters({ studentName: [], country: [], institute: [], visaType: [], submissionDate: [], submittedBy: [], status: [] });
-        setFilterSearch({ studentName: '', country: '', institute: '', visaType: '', submissionDate: '', submittedBy: '', status: '' });
+        setColumnFilters({ studentName: [], country: [], institute: [], visaType: [], submittedBy: [], status: [] });
+        setFilterSearch({ studentName: '', country: '', institute: '', visaType: '', submittedBy: '', status: '' });
         setSearchTerm('');
         setStatFilter(null); // NEW: also clear stat filter
+        setDateRange(EMPTY_DATE_RANGE);
     };
 
     const filteredVisas = visas.filter(v => {
@@ -178,16 +183,16 @@ export default function Visa() {
         if (columnFilters.visaType.length > 0 && !columnFilters.visaType.includes(v.visa_type)) return false;
         if (columnFilters.submittedBy.length > 0 && !columnFilters.submittedBy.includes(v.submitted_by)) return false;
         if (columnFilters.status.length > 0 && !columnFilters.status.includes(v.visa_status)) return false;
-        if (columnFilters.submissionDate.length > 0) {
-            const displayDate = v.submission_date
-                ? new Date(v.submission_date).toLocaleDateString()
-                : null;
-            if (!columnFilters.submissionDate.includes(displayDate)) return false;
-        }
+        if (hasDateRange(dateRange) && !isDateInRange(v.submission_date, dateRange.from, dateRange.to)) return false;
         return true;
     });
 
-    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || statFilter;
+    const { paginatedItems: paginatedVisas, totalPages, currentPage, goToPage } = useListPagination(
+        filteredVisas,
+        [searchTerm, JSON.stringify(columnFilters), dateRange.from, dateRange.to, statFilter].join('|')
+    );
+
+    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || statFilter || hasDateRange(dateRange);
 
     const FilterDropdown = ({ column, label }) => {
         const triggerRef = useRef(null);
@@ -294,6 +299,21 @@ export default function Visa() {
         </div>
     );
 
+    const printColumns = [
+        { header: 'Visa ID', value: (r) => r.visa_id },
+        { header: 'Student Name', value: (r) => r.student_name },
+        { header: 'Student ID', value: (r) => r.student_id || '-' },
+        { header: 'Country', value: (r) => r.student_country || '-' },
+        { header: 'Institute', value: (r) => r.institute || '-' },
+        { header: 'Visa Type', value: (r) => r.visa_type },
+        {
+            header: 'Submission Date',
+            value: (r) => (r.submission_date ? new Date(r.submission_date).toLocaleDateString() : '-'),
+        },
+        { header: 'Submitted By', value: (r) => r.submitted_by || '-' },
+        { header: 'Status', value: (r) => r.visa_status },
+    ];
+
     return (
         <>
             <Sidebar />
@@ -309,6 +329,12 @@ export default function Visa() {
                             </h1>
                         </div>
                         <div className="header-right">
+                            <PrintReportButton
+                                show={hasActiveFilters}
+                                title="Visa Management"
+                                columns={printColumns}
+                                rows={filteredVisas}
+                            />
                             {hasActiveFilters && (
                                 <button className="btn-clear-all-filters" onClick={clearAllFilters}>
                                     <FontAwesomeIcon icon={faTimes} /> Clear All Filters
@@ -363,28 +389,31 @@ export default function Visa() {
                         />
                     </div>
 
-                    {/* Search Bar */}
-                    <div style={{ marginBottom: '16px', position: 'relative' }}>
-                        <FontAwesomeIcon
-                            icon={faSearch}
-                            style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: '14px' }}
+                    <div className="page-toolbar">
+                        <div className="page-search">
+                            <FontAwesomeIcon icon={faSearch} className="page-search-icon" />
+                            <input
+                                type="text"
+                                className="page-search-input"
+                                placeholder="Search by visa ID, student name, institute, or submitted by..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                            {searchTerm && (
+                                <button
+                                    type="button"
+                                    className="page-search-clear"
+                                    onClick={() => setSearchTerm('')}
+                                >
+                                    <FontAwesomeIcon icon={faTimes} />
+                                </button>
+                            )}
+                        </div>
+                        <DateRangeFilter
+                            label="Submission Date"
+                            value={dateRange}
+                            onChange={setDateRange}
                         />
-                        <input
-                            type="text"
-                            className="form-control"
-                            placeholder="Search by visa ID, student name, institute, or submitted by..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            style={{ paddingLeft: '40px', borderRadius: '10px', border: '1px solid #e5e7eb', height: '42px' }}
-                        />
-                        {searchTerm && (
-                            <button
-                                onClick={() => setSearchTerm('')}
-                                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}
-                            >
-                                <FontAwesomeIcon icon={faTimes} />
-                            </button>
-                        )}
                     </div>
 
                     {loading ? (
@@ -392,6 +421,7 @@ export default function Visa() {
                             <p style={{ color: '#6b7280' }}>Loading visas...</p>
                         </div>
                     ) : (
+                        <>
                         <div className="visa-table-container">
                             <table className="visa-table">
                                 <thead>
@@ -401,7 +431,7 @@ export default function Visa() {
                                         <th><FilterDropdown column="country" label="Country" /></th>
                                         <th><FilterDropdown column="institute" label="Institute" /></th>
                                         <th><FilterDropdown column="visaType" label="Visa Type" /></th>
-                                        <th><FilterDropdown column="submissionDate" label="Submission Date" /></th>
+                                        <th>Submission Date</th>
                                         <th><FilterDropdown column="submittedBy" label="Submitted By" /></th>
                                         <th><FilterDropdown column="status" label="Status" /></th>
                                         <th>Actions</th>
@@ -415,7 +445,7 @@ export default function Visa() {
                                             </td>
                                         </tr>
                                     ) : (
-                                        filteredVisas.map((visa) => {
+                                        paginatedVisas.map((visa) => {
                                             const statusStyle = getStatusBadgeStyle(visa.visa_status);
                                             const typeStyle = getVisaTypeStyle(visa.visa_type);
                                             return (
@@ -424,7 +454,9 @@ export default function Visa() {
                                                         <span className="visa-id">{visa.visa_id}</span>
                                                     </td>
                                                     <td>
-                                                        <strong>{visa.student_name}</strong>
+                                                        <Link to={`/edit-visa/${visa.id}`} className="table-name-link">
+                                                            {visa.student_name}
+                                                        </Link>
                                                         <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
                                                             {visa.student_id}
                                                         </div>
@@ -456,6 +488,14 @@ export default function Visa() {
                                                     </td>
                                                     <td>
                                                         <div className="action-buttons">
+                                                            <button
+                                                                type="button"
+                                                                className="btn-icon btn-view"
+                                                                title="View Visa"
+                                                                onClick={() => setViewRecordId(visa.id)}
+                                                            >
+                                                                <FontAwesomeIcon icon={faEye} />
+                                                            </button>
                                                             <Link to={`/edit-visa/${visa.id}`} className="btn-icon btn-edit" title="Edit Visa">
                                                                 <FontAwesomeIcon icon={faEdit} />
                                                             </Link>
@@ -475,9 +515,22 @@ export default function Visa() {
                                 </tbody>
                             </table>
                         </div>
+                        <ListPagination
+                            total={filteredVisas.length}
+                            currentPage={currentPage}
+                            totalPages={totalPages}
+                            onPageChange={goToPage}
+                            itemLabel="visa"
+                        />
+                        </>
                     )}
                 </div>
             </div>
+            {viewRecordId && (
+                <ViewRecordModal title="View Visa" onClose={() => setViewRecordId(null)}>
+                    <EditVisa recordId={viewRecordId} viewOnly />
+                </ViewRecordModal>
+            )}
         </>
     );
 }

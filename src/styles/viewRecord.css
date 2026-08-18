@@ -1,0 +1,104 @@
+.view-record-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.55);
+    z-index: 10050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.view-record-modal {
+    background: #f3f4f6;
+    width: min(1180px, 100%);
+    max-height: calc(100vh - 48px);
+    border-radius: 16px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.view-record-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 22px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+}
+
+.view-record-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.view-record-close {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 8px;
+    background: #f3f4f6;
+    color: #374151;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.view-record-close:hover {
+    background: #e5e7eb;
+}
+
+.view-record-body {
+    overflow: auto;
+    padding: 0 0 24px;
+    flex: 1;
+}
+
+.record-view-embed .sidebar,
+.record-view-embed .top-navbar {
+    display: none !important;
+}
+
+.record-view-embed .main-content {
+    margin-left: 0 !important;
+    min-height: auto !important;
+    padding: 16px 20px 0 !important;
+    width: 100% !important;
+}
+
+.record-view-embed .header-right,
+.record-view-embed .lead-summary-actions,
+.record-view-embed .form-actions,
+.record-view-embed .leads-header .btn-secondary,
+.record-view-embed .students-header .btn-secondary,
+.record-view-embed .logs-header .btn-secondary,
+.record-view-embed button.btn-primary,
+.record-view-embed button.btn-secondary,
+.record-view-embed button.btn-sm,
+.record-view-embed a.btn-primary,
+.record-view-embed a.btn-secondary,
+.record-view-embed .btn-icon,
+.record-view-embed input[type="file"],
+.record-view-embed .btn.btn-primary,
+.record-view-embed .btn.btn-secondary {
+    display: none !important;
+}
+
+.record-view-embed input,
+.record-view-embed select,
+.record-view-embed textarea {
+    pointer-events: none !important;
+    background: #f3f4f6 !important;
+    cursor: default !important;
+}
+
+.record-view-embed a {
+    pointer-events: none;
+}

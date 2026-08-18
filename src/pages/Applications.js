@@ -3,6 +3,13 @@ import '../styles/dashboard.css';
 import '../styles/applications.css';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
+import PrintReportButton from '../components/PrintReportButton';
+import DateRangeFilter from '../components/DateRangeFilter';
+import ViewRecordModal from '../components/ViewRecordModal';
+import EditApplication from './EditApplication';
+import ListPagination from '../components/ListPagination';
+import useListPagination from '../hooks/useListPagination';
+import { EMPTY_DATE_RANGE, hasDateRange, isDateInRange } from '../utils/dateRange';
 import { Link } from 'react-router-dom';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -26,6 +33,7 @@ const getStatusStyle = (status) => {
 
 export default function Applications() {
   const [applications, setApplications] = useState([]);
+  const [viewRecordId, setViewRecordId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState({ total_applications: 0, pending_applications: 0 });
@@ -41,6 +49,7 @@ export default function Applications() {
   });
   // tracks which stat card is active ('total' | 'pending' | null)
   const [statFilter, setStatFilter] = useState(null);
+  const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
 
   useEffect(() => { fetchApplications(); fetchStats(); }, []);
 
@@ -136,6 +145,7 @@ export default function Applications() {
     setFilterSearch({ studentName: '', country: '', university: '', intake: '', status: '' });
     setSearchTerm('');
     setStatFilter(null);
+    setDateRange(EMPTY_DATE_RANGE);
   };
 
   const filteredApplications = applications.filter(app => {
@@ -158,10 +168,16 @@ export default function Applications() {
     if (columnFilters.university.length > 0 && !columnFilters.university.includes(app.university_name)) return false;
     if (columnFilters.intake.length > 0 && !columnFilters.intake.includes(app.intake_name)) return false;
     if (columnFilters.status.length > 0 && !columnFilters.status.includes(app.application_status)) return false;
+    if (hasDateRange(dateRange) && !isDateInRange(app.created_at, dateRange.from, dateRange.to)) return false;
     return true;
   });
 
-  const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || statFilter;
+  const { paginatedItems: paginatedApplications, totalPages, currentPage, goToPage } = useListPagination(
+    filteredApplications,
+    [searchTerm, JSON.stringify(columnFilters), dateRange.from, dateRange.to, statFilter].join('|')
+  );
+
+  const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchTerm.trim() || statFilter || hasDateRange(dateRange);
 
   // ── FilterDropdown ─────────────────────────────────────────────────────────
   const FilterDropdown = ({ column, label }) => {
@@ -245,6 +261,20 @@ export default function Applications() {
     );
   };
 
+  const printColumns = [
+    { header: 'Application ID', value: (r) => r.application_id },
+    { header: 'Student Name', value: (r) => r.student_name || r.student_full_name },
+    { header: 'Student ID', value: (r) => r.student_number || '-' },
+    { header: 'Country', value: (r) => r.country_name || '-' },
+    { header: 'University', value: (r) => r.university_name || 'Not set' },
+    { header: 'Intake', value: (r) => r.intake_name || 'Not set' },
+    { header: 'Status', value: (r) => r.application_status },
+    {
+      header: 'Application Date',
+      value: (r) => (r.created_at ? new Date(r.created_at).toLocaleDateString() : '-'),
+    },
+  ];
+
   return (
     <>
       <Sidebar />
@@ -260,6 +290,12 @@ export default function Applications() {
               </h1>
             </div>
             <div className="header-right">
+              <PrintReportButton
+                show={hasActiveFilters}
+                title="Applications Management"
+                columns={printColumns}
+                rows={filteredApplications}
+              />
               {hasActiveFilters && (
                 <button className="btn-clear-all-filters" onClick={clearAllFilters}>
                   <FontAwesomeIcon icon={faTimes} /> Clear All Filters
@@ -316,22 +352,27 @@ export default function Applications() {
             </div>
           )}
 
-          {/* Search */}
-          <div style={{ marginBottom: '16px', position: 'relative' }}>
-            <FontAwesomeIcon icon={faSearch} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: '14px' }} />
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Search by application ID, student name, university, country..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ paddingLeft: '40px', borderRadius: '10px', border: '1px solid #e5e7eb', height: '42px' }}
+          <div className="page-toolbar">
+            <div className="page-search">
+              <FontAwesomeIcon icon={faSearch} className="page-search-icon" />
+              <input
+                type="text"
+                className="page-search-input"
+                placeholder="Search by application ID, student name, university, country..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <button type="button" className="page-search-clear" onClick={() => setSearchTerm('')}>
+                  <FontAwesomeIcon icon={faTimes} />
+                </button>
+              )}
+            </div>
+            <DateRangeFilter
+              label="Application Date"
+              value={dateRange}
+              onChange={setDateRange}
             />
-            {searchTerm && (
-              <button onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>
-                <FontAwesomeIcon icon={faTimes} />
-              </button>
-            )}
           </div>
 
           {loading ? (
@@ -339,6 +380,7 @@ export default function Applications() {
               <p>Loading applications...</p>
             </div>
           ) : (
+            <>
             <div className="counselors-table-container">
               <table className="counselors-table">
                 <thead>
@@ -349,12 +391,13 @@ export default function Applications() {
                     <th><FilterDropdown column="university" label="University" /></th>
                     <th><FilterDropdown column="intake" label="Intake" /></th>
                     <th><FilterDropdown column="status" label="Status" /></th>
+                    <th>Application Date</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredApplications.length > 0 ? (
-                    filteredApplications.map((app) => {
+                    paginatedApplications.map((app) => {
                       const statusStyle = getStatusStyle(app.application_status);
                       return (
                         <tr key={app.id}>
@@ -362,7 +405,9 @@ export default function Applications() {
                             <span className="counselor-id">{app.application_id}</span>
                           </td>
                           <td>
-                            <strong>{app.student_name || app.student_full_name}</strong>
+                            <Link to={`/edit-application/${app.id}`} className="table-name-link">
+                              {app.student_name || app.student_full_name}
+                            </Link>
                             <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
                               {app.student_number}
                             </div>
@@ -376,7 +421,20 @@ export default function Applications() {
                             </span>
                           </td>
                           <td>
+                            {app.created_at
+                              ? new Date(app.created_at).toLocaleDateString()
+                              : <span style={{ color: '#9ca3af' }}>-</span>}
+                          </td>
+                          <td>
                             <div className="action-buttons">
+                              <button
+                                type="button"
+                                className="btn-icon btn-view"
+                                title="View Application"
+                                onClick={() => setViewRecordId(app.id)}
+                              >
+                                <FontAwesomeIcon icon={faEye} />
+                              </button>
                               {/* View — opens student summary page */}
                               <Link
                                 to={`/student-applications/${app.student_id}`}
@@ -399,7 +457,7 @@ export default function Applications() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
                         {hasActiveFilters ? 'No applications match the selected filters' : 'No applications found'}
                       </td>
                     </tr>
@@ -407,9 +465,22 @@ export default function Applications() {
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              total={filteredApplications.length}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={goToPage}
+              itemLabel="application"
+            />
+            </>
           )}
         </div>
       </div>
+      {viewRecordId && (
+        <ViewRecordModal title="View Application" onClose={() => setViewRecordId(null)}>
+          <EditApplication recordId={viewRecordId} viewOnly />
+        </ViewRecordModal>
+      )}
     </>
   );
 }

@@ -1,8 +1,16 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import '../styles/dashboard.css'
 import '../styles/logs.css'
+import '../styles/leads.css'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
+import PrintReportButton from '../components/PrintReportButton'
+import DateRangeFilter from '../components/DateRangeFilter'
+import ViewRecordModal from '../components/ViewRecordModal'
+import EditLog from './EditLog'
+import ListPagination from '../components/ListPagination'
+import useListPagination from '../hooks/useListPagination'
+import { EMPTY_DATE_RANGE, hasDateRange, isDateInRange } from '../utils/dateRange'
 import { Link } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -11,19 +19,30 @@ import {
   faEdit,
   faTrash,
   faSearch,
-  faSignOutAlt
+  faSignOutAlt,
+  faChevronDown,
+  faTimes,
+  faEye
 } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
 export default function VisitorLogs() {
     const [visitorLogs, setVisitorLogs] = useState([]);
+    const [viewRecordId, setViewRecordId] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     
-    const [filterVisitorType, setFilterVisitorType] = useState('');
-    const [filterStatus, setFilterStatus] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [dateRange, setDateRange] = useState(EMPTY_DATE_RANGE);
+    const [activeFilter, setActiveFilter] = useState(null);
+    const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+    const [columnFilters, setColumnFilters] = useState({
+        visitorName: [], visitorType: [], status: []
+    });
+    const [filterSearch, setFilterSearch] = useState({
+        visitorName: '', visitorType: '', status: ''
+    });
     
     const [stats, setStats] = useState({
         totalVisitors: 0,
@@ -33,19 +52,24 @@ export default function VisitorLogs() {
 
     useEffect(() => {
         fetchVisitorLogs();
-    }, [filterVisitorType, filterStatus, searchQuery]);
+    }, []);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (!event.target.closest('.filter-dropdown-container')) {
+                setActiveFilter(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const fetchVisitorLogs = async () => {
         setLoading(true);
         setError('');
         
         try {
-            const params = new URLSearchParams();
-            if (filterVisitorType) params.append('visitorType', filterVisitorType);
-            if (filterStatus) params.append('status', filterStatus);
-            if (searchQuery) params.append('searchQuery', searchQuery);
-            
-            const response = await fetch(`${API_URL}/visitor-logs?${params.toString()}`);
+            const response = await fetch(`${API_URL}/visitor-logs`);
             const data = await response.json();
             
             if (data.success) {
@@ -153,6 +177,160 @@ export default function VisitorLogs() {
         });
     };
 
+    const getUniqueValues = (column) => {
+        const values = new Set();
+        visitorLogs.forEach(log => {
+            let value;
+            if (column === 'visitorName') value = log.visitor_name;
+            else if (column === 'visitorType') value = log.visitor_type;
+            else if (column === 'status') value = log.status;
+            if (value) values.add(value);
+        });
+        return Array.from(values).sort();
+    };
+
+    const getFilteredOptions = (column) => {
+        const unique = getUniqueValues(column);
+        const term = (filterSearch[column] || '').toLowerCase();
+        return term ? unique.filter(v => v.toLowerCase().includes(term)) : unique;
+    };
+
+    const toggleFilterValue = (column, value) => {
+        setColumnFilters(prev => ({
+            ...prev,
+            [column]: prev[column].includes(value)
+                ? prev[column].filter(v => v !== value)
+                : [...prev[column], value]
+        }));
+    };
+
+    const clearColumnFilter = (column) => {
+        setColumnFilters(prev => ({ ...prev, [column]: [] }));
+        setFilterSearch(prev => ({ ...prev, [column]: '' }));
+    };
+
+    const clearAllFilters = () => {
+        setColumnFilters({ visitorName: [], visitorType: [], status: [] });
+        setFilterSearch({ visitorName: '', visitorType: '', status: '' });
+        setSearchQuery('');
+        setDateRange(EMPTY_DATE_RANGE);
+    };
+
+    const filteredLogs = visitorLogs.filter(log => {
+        if (searchQuery.trim()) {
+            const term = searchQuery.toLowerCase();
+            const matches = (
+                log.visitor_name?.toLowerCase().includes(term) ||
+                log.contact_no?.toLowerCase().includes(term) ||
+                log.log_id?.toLowerCase().includes(term)
+            );
+            if (!matches) return false;
+        }
+        if (columnFilters.visitorName.length > 0 && !columnFilters.visitorName.includes(log.visitor_name)) return false;
+        if (columnFilters.visitorType.length > 0 && !columnFilters.visitorType.includes(log.visitor_type)) return false;
+        if (columnFilters.status.length > 0 && !columnFilters.status.includes(log.status)) return false;
+        if (hasDateRange(dateRange) && !isDateInRange(log.visit_date, dateRange.from, dateRange.to)) return false;
+        return true;
+    });
+
+    const { paginatedItems: paginatedLogs, totalPages, currentPage, goToPage } = useListPagination(
+        filteredLogs,
+        [searchQuery, JSON.stringify(columnFilters), dateRange.from, dateRange.to].join('|')
+    );
+
+    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchQuery.trim() || hasDateRange(dateRange);
+
+    const FilterDropdown = ({ column, label }) => {
+        const triggerRef = useRef(null);
+        const isActive = activeFilter === column;
+        const hasFilters = columnFilters[column].length > 0;
+        const filteredOptions = getFilteredOptions(column);
+        const allOptions = getUniqueValues(column);
+
+        const handleToggle = () => {
+            if (isActive) { setActiveFilter(null); return; }
+            const rect = triggerRef.current.getBoundingClientRect();
+            const dropdownHeight = 380;
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const spaceAbove = rect.top;
+            let top = (spaceBelow >= dropdownHeight || spaceBelow > spaceAbove)
+                ? rect.bottom + 8
+                : rect.top - dropdownHeight - 8;
+            let left = rect.left;
+            if (left + 280 > window.innerWidth) left = window.innerWidth - 300;
+            setDropdownPosition({ top, left });
+            setActiveFilter(column);
+        };
+
+        return (
+            <div className="filter-dropdown-container">
+                <button
+                    ref={triggerRef}
+                    className={`filter-trigger ${hasFilters ? 'has-filters' : ''}`}
+                    onClick={handleToggle}
+                >
+                    {label}
+                    <FontAwesomeIcon icon={faChevronDown} className="filter-icon" />
+                    {hasFilters && <span className="filter-count">{columnFilters[column].length}</span>}
+                </button>
+                {isActive && (
+                    <div className="filter-dropdown" style={{ top: `${dropdownPosition.top}px`, left: `${dropdownPosition.left}px` }}>
+                        <div className="filter-dropdown-header">
+                            <input
+                                type="text"
+                                className="filter-search-input"
+                                placeholder="Search..."
+                                value={filterSearch[column]}
+                                onChange={(e) => setFilterSearch(prev => ({ ...prev, [column]: e.target.value }))}
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        </div>
+                        <div className="filter-options">
+                            <label className="filter-option select-all">
+                                <input
+                                    type="checkbox"
+                                    checked={columnFilters[column].length === allOptions.length && allOptions.length > 0}
+                                    onChange={(e) => {
+                                        if (e.target.checked) setColumnFilters(prev => ({ ...prev, [column]: allOptions }));
+                                        else clearColumnFilter(column);
+                                    }}
+                                />
+                                <span className="filter-label">Select All</span>
+                            </label>
+                            {filteredOptions.length > 0 ? filteredOptions.map((value, i) => (
+                                <label key={i} className="filter-option">
+                                    <input
+                                        type="checkbox"
+                                        checked={columnFilters[column].includes(value)}
+                                        onChange={() => toggleFilterValue(column, value)}
+                                    />
+                                    <span className="filter-label">{value}</span>
+                                </label>
+                            )) : (
+                                <div className="no-results">No results found</div>
+                            )}
+                        </div>
+                        <div className="filter-dropdown-footer">
+                            <button className="btn-clear-filter" onClick={() => clearColumnFilter(column)}>Clear</button>
+                            <button className="btn-apply-filter" onClick={() => setActiveFilter(null)}>Apply</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const printColumns = [
+        { header: 'Log ID', value: (r) => r.log_id },
+        { header: 'Visitor Name', value: (r) => r.visitor_name },
+        { header: 'Visitor Type', value: (r) => r.visitor_type },
+        { header: 'Contact', value: (r) => r.contact_no },
+        { header: 'Visit Date', value: (r) => formatDate(r.visit_date) },
+        { header: 'Time In', value: (r) => r.time_in || '-' },
+        { header: 'Time Out', value: (r) => r.time_out || '-' },
+        { header: 'Status', value: (r) => r.status },
+    ];
+
     return (
         <>
             <Sidebar />
@@ -169,6 +347,18 @@ export default function VisitorLogs() {
                             </h1>
                         </div>
                         <div className="header-right">
+                            <PrintReportButton
+                                show={hasActiveFilters}
+                                title="Visitor Logs Management"
+                                columns={printColumns}
+                                rows={filteredLogs}
+                            />
+                            {hasActiveFilters && (
+                                <button className="btn-clear-all-filters" onClick={clearAllFilters}>
+                                    <FontAwesomeIcon icon={faTimes} />
+                                    Clear All Filters
+                                </button>
+                            )}
                             <Link to="/add-log" className="btn-primary">
                                 <FontAwesomeIcon icon={faPlus} />
                                 Add New Log
@@ -189,46 +379,27 @@ export default function VisitorLogs() {
                         </div>
                     )}
 
-                    <div className="logs-filters">
-                        <div className="search-box">
-                            <FontAwesomeIcon icon={faSearch} className="search-icon" />
-                            <input 
-                                type="text" 
-                                className="input-field" 
-                                placeholder="Search by name, contact, or visitor ID..." 
+                    <div className="page-toolbar">
+                        <div className="page-search">
+                            <FontAwesomeIcon icon={faSearch} className="page-search-icon" />
+                            <input
+                                type="text"
+                                className="page-search-input"
+                                placeholder="Search by name, contact, or visitor ID..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                             />
+                            {searchQuery && (
+                                <button type="button" className="page-search-clear" onClick={() => setSearchQuery('')}>
+                                    <FontAwesomeIcon icon={faTimes} />
+                                </button>
+                            )}
                         </div>
-                        <div className="filter-group">
-                            <select 
-                                className="input-field"
-                                value={filterVisitorType}
-                                onChange={(e) => setFilterVisitorType(e.target.value)}
-                            >
-                                <option value="">All Visitor Types</option>
-                                <option value="Student">Student</option>
-                                <option value="Parent">Parent</option>
-                                <option value="Counselor">Counselor</option>
-                                <option value="Maintenance">Maintenance</option>
-                                <option value="Vendor">Vendor</option>
-                                <option value="Official">Official</option>
-                                <option value="Guest">Guest</option>
-                                <option value="Other">Other</option>
-                            </select>
-                        </div>
-                        <div className="filter-group">
-                            <select 
-                                className="input-field"
-                                value={filterStatus}
-                                onChange={(e) => setFilterStatus(e.target.value)}
-                            >
-                                <option value="">All Status</option>
-                                <option value="In Progress">In Progress</option>
-                                <option value="Completed">Completed</option>
-                                <option value="Cancelled">Cancelled</option>
-                            </select>
-                        </div>
+                        <DateRangeFilter
+                            label="Visit Date"
+                            value={dateRange}
+                            onChange={setDateRange}
+                        />
                     </div>
 
                     {loading ? (
@@ -242,26 +413,28 @@ export default function VisitorLogs() {
                                     <thead>
                                         <tr>
                                             <th>Log ID</th>
-                                            <th>Visitor Name</th>
-                                            <th>Visitor Type</th>
+                                            <th><FilterDropdown column="visitorName" label="Visitor Name" /></th>
+                                            <th><FilterDropdown column="visitorType" label="Visitor Type" /></th>
                                             <th>Contact</th>
                                             <th>Visit Date</th>
                                             <th>Time In</th>
                                             <th>Time Out</th>
-                                            <th>Status</th>
+                                            <th><FilterDropdown column="status" label="Status" /></th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {visitorLogs.length > 0 ? (
-                                            visitorLogs.map((log) => (
+                                        {filteredLogs.length > 0 ? (
+                                            paginatedLogs.map((log) => (
                                                 <tr key={log.id}>
                                                     <td>
                                                         <span className="log-id">{log.log_id}</span>
                                                     </td>
                                                     <td>
                                                         <div className="visitor-info">
-                                                            <strong>{log.visitor_name}</strong>
+                                                            <Link to={`/edit-log/${log.id}`} className="table-name-link">
+                                                                {log.visitor_name}
+                                                            </Link>
                                                         </div>
                                                     </td>
                                                     <td>
@@ -286,6 +459,14 @@ export default function VisitorLogs() {
                                                     </td>
                                                     <td>
                                                         <div className="action-buttons">
+                                                            <button
+                                                                type="button"
+                                                                className="btn-icon btn-view"
+                                                                title="View Log"
+                                                                onClick={() => setViewRecordId(log.id)}
+                                                            >
+                                                                <FontAwesomeIcon icon={faEye} />
+                                                            </button>
                                                             {log.status === 'In Progress' && (
                                                                 <button 
                                                                     className="btn-icon btn-success" 
@@ -316,7 +497,7 @@ export default function VisitorLogs() {
                                         ) : (
                                             <tr>
                                                 <td colSpan="9" style={{ textAlign: 'center', padding: '40px' }}>
-                                                    No visitor logs found
+                                                    {hasActiveFilters ? 'No visitor logs match the selected filters' : 'No visitor logs found'}
                                                 </td>
                                             </tr>
                                         )}
@@ -324,20 +505,22 @@ export default function VisitorLogs() {
                                 </table>
                             </div>
 
-                            <div className="pagination">
-                                <button className="btn-secondary">Previous</button>
-                                <div className="page-numbers">
-                                    <button className="page-number active">1</button>
-                                    <button className="page-number">2</button>
-                                    <button className="page-number">3</button>
-                                    <button className="page-number">4</button>
-                                </div>
-                                <button className="btn-secondary">Next</button>
-                            </div>
+                            <ListPagination
+                                total={filteredLogs.length}
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                onPageChange={goToPage}
+                                itemLabel="visitor log"
+                            />
                         </>
                     )}
                 </div>
             </div>
+            {viewRecordId && (
+                <ViewRecordModal title="View Visitor Log" onClose={() => setViewRecordId(null)}>
+                    <EditLog recordId={viewRecordId} viewOnly />
+                </ViewRecordModal>
+            )}
         </>
     )
 }

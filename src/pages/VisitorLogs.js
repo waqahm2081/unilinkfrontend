@@ -22,7 +22,8 @@ import {
   faSignOutAlt,
   faChevronDown,
   faTimes,
-  faEye
+  faEye,
+  faHistory
 } from "@fortawesome/free-solid-svg-icons";
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
@@ -38,10 +39,10 @@ export default function VisitorLogs() {
     const [activeFilter, setActiveFilter] = useState(null);
     const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
     const [columnFilters, setColumnFilters] = useState({
-        visitorName: [], visitorType: [], status: []
+        visitorName: [], visitorType: [], status: [], followupName: [], purposeOfVisit: []
     });
     const [filterSearch, setFilterSearch] = useState({
-        visitorName: '', visitorType: '', status: ''
+        visitorName: '', visitorType: '', status: '', followupName: '', purposeOfVisit: ''
     });
     
     const [stats, setStats] = useState({
@@ -49,10 +50,35 @@ export default function VisitorLogs() {
         todayVisitors: 0,
         currentlyInOffice: 0
     });
+    const [logView, setLogView] = useState('logs');
+    const [followups, setFollowups] = useState([]);
 
     useEffect(() => {
-        fetchVisitorLogs();
-    }, []);
+        if (logView === 'logs') {
+            fetchVisitorLogs();
+        } else {
+            fetchFollowupVisitors();
+        }
+    }, [logView]);
+
+    const fetchFollowupVisitors = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const response = await fetch(`${API_URL}/leads/followups?view=all`);
+            const data = await response.json();
+            if (data.success) {
+                setFollowups(data.followups || []);
+            } else {
+                setError(data.message || 'Failed to fetch follow-up visitors');
+            }
+        } catch (err) {
+            console.error('Error fetching follow-up visitors:', err);
+            setError('Network error. Please check your connection.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -169,7 +195,9 @@ export default function VisitorLogs() {
     };
 
     const formatDate = (dateString) => {
+        if (!dateString) return '-';
         const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) return '-';
         return date.toLocaleDateString('en-US', { 
             year: 'numeric', 
             month: 'short', 
@@ -179,14 +207,23 @@ export default function VisitorLogs() {
 
     const getUniqueValues = (column) => {
         const values = new Set();
-        visitorLogs.forEach(log => {
-            let value;
-            if (column === 'visitorName') value = log.visitor_name;
-            else if (column === 'visitorType') value = log.visitor_type;
-            else if (column === 'status') value = log.status;
-            if (value) values.add(value);
-        });
-        return Array.from(values).sort();
+        if (column === 'followupName' || column === 'purposeOfVisit') {
+            followups.forEach(fu => {
+                let value;
+                if (column === 'followupName') value = fu.full_name;
+                else if (column === 'purposeOfVisit') value = fu.purpose_of_visit || '-';
+                if (value) values.add(value);
+            });
+        } else {
+            visitorLogs.forEach(log => {
+                let value;
+                if (column === 'visitorName') value = log.visitor_name;
+                else if (column === 'visitorType') value = log.visitor_type;
+                else if (column === 'status') value = log.status;
+                if (value) values.add(value);
+            });
+        }
+        return Array.from(values).sort((a, b) => String(a).localeCompare(String(b)));
     };
 
     const getFilteredOptions = (column) => {
@@ -210,8 +247,8 @@ export default function VisitorLogs() {
     };
 
     const clearAllFilters = () => {
-        setColumnFilters({ visitorName: [], visitorType: [], status: [] });
-        setFilterSearch({ visitorName: '', visitorType: '', status: '' });
+        setColumnFilters({ visitorName: [], visitorType: [], status: [], followupName: [], purposeOfVisit: [] });
+        setFilterSearch({ visitorName: '', visitorType: '', status: '', followupName: '', purposeOfVisit: '' });
         setSearchQuery('');
         setDateRange(EMPTY_DATE_RANGE);
     };
@@ -233,12 +270,32 @@ export default function VisitorLogs() {
         return true;
     });
 
-    const { paginatedItems: paginatedLogs, totalPages, currentPage, goToPage } = useListPagination(
-        filteredLogs,
-        [searchQuery, JSON.stringify(columnFilters), dateRange.from, dateRange.to].join('|')
+    const filteredFollowups = followups.filter(fu => {
+        if (searchQuery.trim()) {
+            const term = searchQuery.toLowerCase();
+            const matches = (
+                fu.full_name?.toLowerCase().includes(term) ||
+                fu.email?.toLowerCase().includes(term) ||
+                (fu.purpose_of_visit || '').toLowerCase().includes(term)
+            );
+            if (!matches) return false;
+        }
+        if (columnFilters.followupName.length > 0 && !columnFilters.followupName.includes(fu.full_name)) return false;
+        const purposeValue = fu.purpose_of_visit || '-';
+        if (columnFilters.purposeOfVisit.length > 0 && !columnFilters.purposeOfVisit.includes(purposeValue)) return false;
+        if (hasDateRange(dateRange) && !isDateInRange(fu.last_follow_up, dateRange.from, dateRange.to)) return false;
+        return true;
+    });
+
+    const listItems = logView === 'followups' ? filteredFollowups : filteredLogs;
+    const { paginatedItems, totalPages, currentPage, goToPage } = useListPagination(
+        listItems,
+        [logView, searchQuery, JSON.stringify(columnFilters), dateRange.from, dateRange.to].join('|')
     );
 
-    const hasActiveFilters = Object.values(columnFilters).some(f => f.length > 0) || searchQuery.trim() || hasDateRange(dateRange);
+    const hasActiveFilters = logView === 'followups'
+        ? Boolean(searchQuery.trim() || hasDateRange(dateRange) || columnFilters.followupName.length > 0 || columnFilters.purposeOfVisit.length > 0)
+        : Boolean(columnFilters.visitorName.length > 0 || columnFilters.visitorType.length > 0 || columnFilters.status.length > 0 || searchQuery.trim() || hasDateRange(dateRange));
 
     const FilterDropdown = ({ column, label }) => {
         const triggerRef = useRef(null);
@@ -320,16 +377,23 @@ export default function VisitorLogs() {
         );
     };
 
-    const printColumns = [
-        { header: 'Log ID', value: (r) => r.log_id },
-        { header: 'Visitor Name', value: (r) => r.visitor_name },
-        { header: 'Visitor Type', value: (r) => r.visitor_type },
-        { header: 'Contact', value: (r) => r.contact_no },
-        { header: 'Visit Date', value: (r) => formatDate(r.visit_date) },
-        { header: 'Time In', value: (r) => r.time_in || '-' },
-        { header: 'Time Out', value: (r) => r.time_out || '-' },
-        { header: 'Status', value: (r) => r.status },
-    ];
+    const printColumns = logView === 'followups'
+        ? [
+            { header: 'Name', value: (r) => r.full_name },
+            { header: 'Email', value: (r) => r.email || '-' },
+            { header: 'Purpose of Visit', value: (r) => r.purpose_of_visit || '-' },
+            { header: 'Date', value: (r) => formatDate(r.last_follow_up) },
+          ]
+        : [
+            { header: 'Log ID', value: (r) => r.log_id },
+            { header: 'Visitor Name', value: (r) => r.visitor_name },
+            { header: 'Visitor Type', value: (r) => r.visitor_type },
+            { header: 'Contact', value: (r) => r.contact_no },
+            { header: 'Visit Date', value: (r) => formatDate(r.visit_date) },
+            { header: 'Time In', value: (r) => r.time_in || '-' },
+            { header: 'Time Out', value: (r) => r.time_out || '-' },
+            { header: 'Status', value: (r) => r.status },
+          ];
 
     return (
         <>
@@ -349,9 +413,9 @@ export default function VisitorLogs() {
                         <div className="header-right">
                             <PrintReportButton
                                 show={hasActiveFilters}
-                                title="Visitor Logs Management"
+                                title={logView === 'followups' ? 'Follow-up Visitors' : 'Visitor Logs Management'}
                                 columns={printColumns}
-                                rows={filteredLogs}
+                                rows={listItems}
                             />
                             {hasActiveFilters && (
                                 <button className="btn-clear-all-filters" onClick={clearAllFilters}>
@@ -359,11 +423,32 @@ export default function VisitorLogs() {
                                     Clear All Filters
                                 </button>
                             )}
-                            <Link to="/add-log" className="btn-primary">
-                                <FontAwesomeIcon icon={faPlus} />
-                                Add New Log
-                            </Link>
+                            {logView === 'logs' && (
+                                <Link to="/add-log" className="btn-primary">
+                                    <FontAwesomeIcon icon={faPlus} />
+                                    Add New Log
+                                </Link>
+                            )}
                         </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                        <button
+                            type="button"
+                            className={logView === 'logs' ? 'btn-primary' : 'btn-secondary'}
+                            onClick={() => setLogView('logs')}
+                        >
+                            <FontAwesomeIcon icon={faClipboardList} style={{ marginRight: '8px' }} />
+                            Visitor Logs
+                        </button>
+                        <button
+                            type="button"
+                            className={logView === 'followups' ? 'btn-primary' : 'btn-secondary'}
+                            onClick={() => setLogView('followups')}
+                        >
+                            <FontAwesomeIcon icon={faHistory} style={{ marginRight: '8px' }} />
+                            Follow-up Visitors
+                        </button>
                     </div>
 
                     {error && (
@@ -385,7 +470,9 @@ export default function VisitorLogs() {
                             <input
                                 type="text"
                                 className="page-search-input"
-                                placeholder="Search by name, contact, or visitor ID..."
+                                placeholder={logView === 'followups'
+                                    ? 'Search by name, email, or purpose...'
+                                    : 'Search by name, contact, or visitor ID...'}
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                             />
@@ -396,7 +483,7 @@ export default function VisitorLogs() {
                             )}
                         </div>
                         <DateRangeFilter
-                            label="Visit Date"
+                            label={logView === 'followups' ? 'Follow-up Date' : 'Visit Date'}
                             value={dateRange}
                             onChange={setDateRange}
                         />
@@ -404,8 +491,49 @@ export default function VisitorLogs() {
 
                     {loading ? (
                         <div style={{ textAlign: 'center', padding: '40px' }}>
-                            <p>Loading visitor logs...</p>
+                            <p>{logView === 'followups' ? 'Loading follow-up visitors...' : 'Loading visitor logs...'}</p>
                         </div>
+                    ) : logView === 'followups' ? (
+                        <>
+                            <div className="logs-table-container">
+                                <table className="logs-table">
+                                    <thead>
+                                        <tr>
+                                            <th><FilterDropdown column="followupName" label="Name" /></th>
+                                            <th>Email</th>
+                                            <th><FilterDropdown column="purposeOfVisit" label="Purpose of Visit" /></th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredFollowups.length > 0 ? (
+                                            paginatedItems.map((fu) => (
+                                                <tr key={fu.follow_up_id}>
+                                                    <td>{fu.full_name || '-'}</td>
+                                                    <td>{fu.email || '-'}</td>
+                                                    <td>{fu.purpose_of_visit || '-'}</td>
+                                                    <td>{fu.last_follow_up ? formatDate(fu.last_follow_up) : '-'}</td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr>
+                                                <td colSpan="4" style={{ textAlign: 'center', padding: '40px' }}>
+                                                    {hasActiveFilters ? 'No follow-up visitors match the selected filters' : 'No follow-up visitors found'}
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <ListPagination
+                                total={filteredFollowups.length}
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                onPageChange={goToPage}
+                                itemLabel="follow-up visitor"
+                            />
+                        </>
                     ) : (
                         <>
                             <div className="logs-table-container">
@@ -425,7 +553,7 @@ export default function VisitorLogs() {
                                     </thead>
                                     <tbody>
                                         {filteredLogs.length > 0 ? (
-                                            paginatedLogs.map((log) => (
+                                            paginatedItems.map((log) => (
                                                 <tr key={log.id}>
                                                     <td>
                                                         <span className="log-id">{log.log_id}</span>

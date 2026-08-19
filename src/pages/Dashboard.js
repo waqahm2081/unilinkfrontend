@@ -14,6 +14,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.
 
 const getStatusStyle = (status) => {
   const styles = {
+    'In Progress': { background: '#ffedd5', color: '#9a3412' },
     'Pending':   { background: '#fef9c3', color: '#854d0e' },
     'Approved':  { background: '#dcfce7', color: '#166534' },
     'Accepted':  { background: '#dbeafe', color: '#1e40af' },

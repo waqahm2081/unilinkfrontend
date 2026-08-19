@@ -21,6 +21,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.
 
 const getStatusStyle = (status) => {
   const styles = {
+    'In Progress': { background: '#ffedd5', color: '#9a3412' },
     'Pending':    { background: '#fef9c3', color: '#854d0e' },
     'Approved':   { background: '#dcfce7', color: '#166534' },
     'Accepted':   { background: '#dbeafe', color: '#1e40af' },
@@ -168,7 +169,7 @@ export default function Applications() {
     if (columnFilters.university.length > 0 && !columnFilters.university.includes(app.university_name)) return false;
     if (columnFilters.intake.length > 0 && !columnFilters.intake.includes(app.intake_name)) return false;
     if (columnFilters.status.length > 0 && !columnFilters.status.includes(app.application_status)) return false;
-    if (hasDateRange(dateRange) && !isDateInRange(app.created_at, dateRange.from, dateRange.to)) return false;
+    if (hasDateRange(dateRange) && !isDateInRange(app.application_date || app.created_at, dateRange.from, dateRange.to)) return false;
     return true;
   });
 
@@ -271,7 +272,10 @@ export default function Applications() {
     { header: 'Status', value: (r) => r.application_status },
     {
       header: 'Application Date',
-      value: (r) => (r.created_at ? new Date(r.created_at).toLocaleDateString() : '-'),
+      value: (r) => {
+        const date = r.application_date || r.created_at;
+        return date ? new Date(date).toLocaleDateString() : '-';
+      },
     },
   ];
 
@@ -421,8 +425,8 @@ export default function Applications() {
                             </span>
                           </td>
                           <td>
-                            {app.created_at
-                              ? new Date(app.created_at).toLocaleDateString()
+                            {app.application_date || app.created_at
+                              ? new Date(app.application_date || app.created_at).toLocaleDateString()
                               : <span style={{ color: '#9ca3af' }}>-</span>}
                           </td>
                           <td>

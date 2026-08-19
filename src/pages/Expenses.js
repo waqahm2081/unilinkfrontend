@@ -36,7 +36,9 @@ const emptyForm = {
   amount: '',
   paymentMode: '',
   expenseDate: new Date().toISOString().split('T')[0],
-  referenceNo: ''
+  referenceNo: '',
+  paymentSource: 'cash',
+  bankAccountId: ''
 };
 
 export default function Expenses() {
@@ -58,6 +60,7 @@ export default function Expenses() {
   const [formData, setFormData] = useState(emptyForm);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
 
   // Delete modal
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -66,6 +69,15 @@ export default function Expenses() {
   useEffect(() => {
     fetchExpenses();
   }, [filterCategory, filterPaymentMode, searchQuery, dateRange]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/finance/bank-accounts`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) setBankAccounts((data.accounts || []).filter(a => a.status === 'Active'));
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchExpenses = async () => {
     setLoading(true);
@@ -114,7 +126,9 @@ export default function Expenses() {
       amount: expense.amount || '',
       paymentMode: expense.payment_mode || '',
       expenseDate: expense.expense_date ? expense.expense_date.split('T')[0] : '',
-      referenceNo: expense.reference_no || ''
+      referenceNo: expense.reference_no || '',
+      paymentSource: expense.payment_source || (expense.payment_mode === 'Cash' ? 'cash' : 'bank'),
+      bankAccountId: expense.bank_account_id ? String(expense.bank_account_id) : ''
     });
     setFormError('');
     setShowModal(true);
@@ -131,6 +145,10 @@ export default function Expenses() {
   };
 
   const handleSubmit = async () => {
+    if (formData.paymentSource === 'bank' && !formData.bankAccountId) {
+      setFormError('Please select a bank account');
+      return;
+    }
     setFormLoading(true);
     setFormError('');
 
@@ -224,6 +242,7 @@ export default function Expenses() {
     { header: 'Description', value: (r) => r.description || '-' },
     { header: 'Amount', value: (r) => formatAmount(r.amount) },
     { header: 'Payment Mode', value: (r) => r.payment_mode },
+    { header: 'Paid From', value: (r) => (r.payment_source === 'bank' ? (r.account_name || 'Bank') : 'Cash') },
     { header: 'Date', value: (r) => formatDate(r.expense_date) },
   ];
 
@@ -335,6 +354,7 @@ export default function Expenses() {
                     <th>Description</th>
                     <th>Amount</th>
                     <th>Payment Mode</th>
+                    <th>Paid From</th>
                     <th>Date</th>
                     <th>Actions</th>
                   </tr>
@@ -356,6 +376,11 @@ export default function Expenses() {
                       <td>
                         <span className="time-badge">{exp.payment_mode}</span>
                       </td>
+                      <td>
+                        {exp.payment_source === 'bank'
+                          ? (exp.account_name || 'Bank')
+                          : 'Cash'}
+                      </td>
                       <td>{formatDate(exp.expense_date)}</td>
                       <td>
                         <div className="action-buttons">
@@ -370,7 +395,7 @@ export default function Expenses() {
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', padding: '40px' }}>No expenses found</td>
+                      <td colSpan="9" style={{ textAlign: 'center', padding: '40px' }}>No expenses found</td>
                     </tr>
                   )}
                 </tbody>
@@ -443,6 +468,42 @@ export default function Expenses() {
                     </select>
                   </div>
                 </div>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Paid From <span className="required">*</span></label>
+                    <select
+                      name="paymentSource"
+                      className="input-field form-control"
+                      value={formData.paymentSource}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setFormData(prev => ({
+                          ...prev,
+                          paymentSource: value,
+                          bankAccountId: value === 'cash' ? '' : prev.bankAccountId
+                        }));
+                      }}
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="bank">Bank Account</option>
+                    </select>
+                  </div>
+                </div>
+                {formData.paymentSource === 'bank' && (
+                  <div className="col-md-6">
+                    <div className="form-group">
+                      <label>Bank Account <span className="required">*</span></label>
+                      <select name="bankAccountId" className="input-field form-control" value={formData.bankAccountId} onChange={handleChange}>
+                        <option value="">Select Bank Account</option>
+                        {bankAccounts.map(acc => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.account_name} — {acc.bank_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
                 <div className="col-md-6">
                   <div className="form-group">
                     <label>Expense Date <span className="required">*</span></label>

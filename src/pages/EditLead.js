@@ -1640,7 +1640,7 @@ export default function EditLead({ recordId, viewOnly = false } = {}) {
                                             <FontAwesomeIcon icon={faFileInvoiceDollar} style={{ fontSize: '32px', opacity: 0.3, marginBottom: '12px' }} />
                                             <p style={{ margin: 0 }}>No student invoices found for <strong>{leadData.email}</strong></p>
                                             <button type="button" className="btn-primary" style={{ marginTop: '16px' }}
-                                                onClick={() => { setShowPaymentModal(false); navigate('/finance'); }}>
+                                                onClick={() => { setShowPaymentModal(false); navigate('/finance/invoices'); }}>
                                                 <FontAwesomeIcon icon={faExternalLinkAlt} style={{ marginRight: '8px' }} />
                                                 Go to Finance Module
                                             </button>
@@ -1693,7 +1693,7 @@ export default function EditLead({ recordId, viewOnly = false } = {}) {
                                                             <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                                                                 {!inv.countries_match ? (
                                                                     <button type="button" className="btn-secondary" style={{ fontSize: '12px' }}
-                                                                        onClick={() => { setShowPaymentModal(false); navigate('/finance'); }}>
+                                                                        onClick={() => { setShowPaymentModal(false); navigate('/finance/invoices'); }}>
                                                                         <FontAwesomeIcon icon={faExternalLinkAlt} style={{ marginRight: '6px' }} />
                                                                         Finance
                                                                     </button>

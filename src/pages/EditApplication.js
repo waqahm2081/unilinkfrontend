@@ -5,10 +5,35 @@ import '../styles/applications.css';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import { ViewModeWrap } from '../components/ViewRecordModal';
+import StudentSearchSelect from '../components/StudentSearchSelect';
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faFileAlt, faSave, faTimes, faFileUpload, faUpload, faDownload, faTrash, faEnvelopeOpen } from "@fortawesome/free-solid-svg-icons";
+import { faFileAlt, faSave, faTimes, faUpload, faDownload, faTrash } from "@fortawesome/free-solid-svg-icons";
+import {
+  APPLICATION_CHANNELS,
+  APPLICATION_DOCUMENT_TYPES,
+  APPLICATION_STATUS_OPTIONS,
+  OFFER_LETTER_OPTIONS,
+  PAID_STATUS_OPTIONS,
+  TAGGING_STATUS_OPTIONS,
+  TUITION_STATUS_OPTIONS,
+  getIntakeOptions,
+  normalizeTaggingStatus,
+} from '../constants/applicationOptions';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
+
+const parseStoredOption = (value, options) => {
+  if (!value) return { selected: '', other: '' };
+  if (options.includes(value)) return { selected: value, other: '' };
+  if (String(value).startsWith('Other:')) return { selected: 'Other', other: String(value).replace(/^Other:\s*/, '') };
+  return { selected: 'Other', other: value };
+};
+
+const parseIntake = (app) => {
+  const value = app.intake || '';
+  if (!value && app.intake_name) return parseStoredOption(app.intake_name, getIntakeOptions());
+  return parseStoredOption(value, getIntakeOptions());
+};
 
 export default function EditApplication({ recordId, viewOnly = false } = {}) {
   const navigate = useNavigate();
@@ -21,33 +46,34 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
     studentId: '',
     countryId: '',
     universityId: '',
-    intakeId: '',
     program: '',
+    intake: '',
+    intakeOther: '',
     appsSubmittedThrough: '',
+    appsSubmittedThroughOther: '',
     appsTaggedThrough: '',
-    universityFees: '',
-    withdrawn: 'No',
-    condition: '',
-    firm: '',
-    insurance: '',
-    finalChoice: '',
-    depositPaid: 'No',
+    appsTaggedThroughOther: '',
+    taggingStatus: 'Not Tagged',
     applicationStatus: 'Pending',
-    taggingStatus: 'Not Received',
-    remarks: ''
+    offerLetterType: '',
+    offerLetterOther: '',
+    universityFees: '',
+    initialDepositStatus: '',
+    initialDepositAmount: '',
+    enrollmentFeeStatus: '',
+    enrollmentFeeAmount: '',
+    tuitionFeeStatus: '',
+    tuitionFeeAmount: '',
+    condition: '',
+    remarks: '',
   });
 
   const [students, setStudents] = useState([]);
   const [countries, setCountries] = useState([]);
   const [universities, setUniversities] = useState([]);
-  const [intakes, setIntakes] = useState([]);
-
-  const [manualForm, setManualForm] = useState(null);
-  const [offerLetter, setOfferLetter] = useState(null);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadType, setUploadType] = useState('manual'); // 'manual' | 'offer'
-  const [uploadingFile, setUploadingFile] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [uploadingType, setUploadingType] = useState('');
+  const intakeOptions = getIntakeOptions();
 
   useEffect(() => {
     fetchStudents();
@@ -59,10 +85,6 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
     if (formData.countryId) fetchUniversitiesByCountry(formData.countryId);
   }, [formData.countryId]);
 
-  useEffect(() => {
-    if (formData.universityId) fetchIntakesByUniversity(formData.universityId);
-  }, [formData.universityId]);
-
   const fetchApplicationData = async () => {
     try {
       setFetchingData(true);
@@ -70,28 +92,37 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
       const data = await res.json();
       if (data.success) {
         const app = data.application;
+        const intake = parseIntake(app);
+        const submitted = parseStoredOption(app.apps_submitted_through, APPLICATION_CHANNELS);
+        const tagged = parseStoredOption(app.apps_tagged_through, APPLICATION_CHANNELS);
+        const offer = parseStoredOption(app.offer_letter_type, OFFER_LETTER_OPTIONS);
         setFormData({
-          applicationDate: app.application_date.split('T')[0],
+          applicationDate: app.application_date ? String(app.application_date).split('T')[0] : '',
           studentId: app.student_id,
           countryId: app.country_id,
           universityId: app.university_id,
-          intakeId: app.intake_id,
           program: app.program || '',
-          appsSubmittedThrough: app.apps_submitted_through || '',
-          appsTaggedThrough: app.apps_tagged_through || '',
-          universityFees: app.university_fees || '',
-          withdrawn: app.withdrawn || 'No',
-          condition: app.condition || '',
-          firm: app.firm || '',
-          insurance: app.insurance || '',
-          finalChoice: app.final_choice || '',
-          depositPaid: app.deposit_paid || 'No',
+          intake: intake.selected,
+          intakeOther: intake.other || app.intake_other || '',
+          appsSubmittedThrough: submitted.selected,
+          appsSubmittedThroughOther: app.apps_submitted_through_other || submitted.other,
+          appsTaggedThrough: tagged.selected,
+          appsTaggedThroughOther: app.apps_tagged_through_other || tagged.other,
+          taggingStatus: normalizeTaggingStatus(app.tagging_status),
           applicationStatus: app.application_status || 'Pending',
-          taggingStatus: app.tagging_status || 'Not Received',
-          remarks: app.remarks || ''
+          offerLetterType: offer.selected,
+          offerLetterOther: app.offer_letter_other || offer.other,
+          universityFees: app.university_fees || '',
+          initialDepositStatus: app.initial_deposit_status || '',
+          initialDepositAmount: app.initial_deposit_amount || '',
+          enrollmentFeeStatus: app.enrollment_fee_status || '',
+          enrollmentFeeAmount: app.enrollment_fee_amount || '',
+          tuitionFeeStatus: app.tuition_fee_status || '',
+          tuitionFeeAmount: app.tuition_fee_amount || '',
+          condition: app.condition || '',
+          remarks: app.remarks || '',
         });
-        fetchManualForm();
-        fetchOfferLetter();
+        fetchDocuments();
       } else {
         alert('Application not found');
         navigate('/applications');
@@ -103,19 +134,11 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
     }
   };
 
-  const fetchManualForm = async () => {
+  const fetchDocuments = async () => {
     try {
-      const res = await fetch(`${API_URL}/applications/${id}/manual-form`);
+      const res = await fetch(`${API_URL}/applications/${id}/documents`);
       const data = await res.json();
-      if (data.success && data.manualForm) setManualForm(data.manualForm);
-    } catch (e) { console.error(e); }
-  };
-
-  const fetchOfferLetter = async () => {
-    try {
-      const res = await fetch(`${API_URL}/applications/${id}/offer-letter`);
-      const data = await res.json();
-      if (data.success && data.offerLetter) setOfferLetter(data.offerLetter);
+      if (data.success) setDocuments(data.documents || []);
     } catch (e) { console.error(e); }
   };
 
@@ -143,14 +166,6 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
     } catch (e) { setUniversities([]); }
   };
 
-  const fetchIntakesByUniversity = async (universityId) => {
-    try {
-      const res = await fetch(`${API_URL}/intakes/by-university/${universityId}`);
-      const data = await res.json();
-      if (data.success) setIntakes(data.intakes);
-    } catch (e) { setIntakes([]); }
-  };
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -159,7 +174,7 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (viewOnly) return;
-    if (!formData.studentId || !formData.countryId || !formData.universityId || !formData.intakeId || !formData.program) {
+    if (!formData.studentId || !formData.countryId || !formData.universityId || !formData.program) {
       alert('Please fill in all required fields');
       return;
     }
@@ -180,62 +195,36 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
     }
   };
 
-  const openUpload = (type) => {
-    setUploadType(type);
-    setSelectedFile(null);
-    setShowUploadModal(true);
-  };
-
-  const handleFileUpload = async (e) => {
-    e.preventDefault();
-    if (!selectedFile) { alert('Please select a file'); return; }
-    setUploadingFile(true);
+  const handleDocumentUpload = async (documentType, file) => {
+    if (!file) return;
+    setUploadingType(documentType);
     try {
       const fd = new FormData();
-      const endpoint = uploadType === 'manual'
-        ? `${API_URL}/applications/${id}/manual-form`
-        : `${API_URL}/applications/${id}/offer-letter`;
-      const fieldName = uploadType === 'manual' ? 'manualForm' : 'offerLetter';
-      fd.append(fieldName, selectedFile);
-
-      const response = await fetch(endpoint, { method: 'POST', body: fd });
-      const data = await response.json();
-
-      if (data.success) {
-        alert(`${uploadType === 'manual' ? 'Manual form' : 'Offer letter'} uploaded successfully`);
-        setShowUploadModal(false);
-        setSelectedFile(null);
-        if (uploadType === 'manual') fetchManualForm();
-        else fetchOfferLetter();
-      } else {
-        alert(data.message || 'Failed to upload file');
-      }
-    } catch (error) {
+      fd.append('document', file);
+      fd.append('documentType', documentType);
+      const res = await fetch(`${API_URL}/applications/${id}/documents`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.success) fetchDocuments();
+      else alert(data.message || 'Failed to upload document');
+    } catch (e) {
       alert('Network error. Please try again.');
     } finally {
-      setUploadingFile(false);
+      setUploadingType('');
     }
   };
 
-  const handleDeleteManualForm = async () => {
-    if (!window.confirm('Delete this manual form?')) return;
+  const handleDeleteDocument = async (docId) => {
+    if (!window.confirm('Delete this document?')) return;
     try {
-      const res = await fetch(`${API_URL}/applications/${id}/manual-form`, { method: 'DELETE' });
+      const res = await fetch(`${API_URL}/applications/${id}/documents/${docId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) { alert('Manual form deleted'); setManualForm(null); }
+      if (data.success) fetchDocuments();
       else alert(data.message || 'Failed to delete');
     } catch (e) { alert('Network error.'); }
   };
 
-  const handleDeleteOfferLetter = async () => {
-    if (!window.confirm('Delete this offer letter?')) return;
-    try {
-      const res = await fetch(`${API_URL}/applications/${id}/offer-letter`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) { alert('Offer letter deleted'); setOfferLetter(null); }
-      else alert(data.message || 'Failed to delete');
-    } catch (e) { alert('Network error.'); }
-  };
+  const docsForType = (type) => documents.filter(d => d.document_type === type);
+  const showOfferLetter = formData.applicationStatus === 'Accepted';
 
   if (fetchingData) {
     return (
@@ -249,85 +238,22 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
     );
   }
 
-  // Shared document card style
-  const docCard = (color) => ({
-    background: `linear-gradient(135deg, ${color})`,
-    padding: '16px 20px', borderRadius: '12px', marginBottom: '16px', color: 'white',
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-  });
-
   return (
     <ViewModeWrap viewOnly={viewOnly}>
       <Sidebar />
       <div className="main-content" id="mainContent">
         <Header />
         <div className="form-container counselors-container">
-          {/* Header with upload buttons */}
-          <div className="form-header" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-            <h1 style={{ flex: 1 }}>
+          <div className="form-header">
+            <h1>
               <FontAwesomeIcon icon={faFileAlt} className="page-icon" />
               {viewOnly ? 'Application Details' : 'Edit Application'}
             </h1>
-            <button type="button" className="btn-secondary" onClick={() => openUpload('manual')}>
-              <FontAwesomeIcon icon={faFileUpload} /> Upload Manual Form
-            </button>
-            <button type="button" className="btn-primary" onClick={() => openUpload('offer')}>
-              <FontAwesomeIcon icon={faEnvelopeOpen} /> Upload Offer Letter
-            </button>
           </div>
 
-          {/* Manual Form Card */}
-          {manualForm && (
-            <div style={docCard('#667eea 0%, #764ba2 100%')}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <FontAwesomeIcon icon={faFileUpload} style={{ fontSize: '24px' }} />
-                <div>
-                  <strong style={{ fontSize: '15px' }}>Manual Form</strong>
-                  <div style={{ fontSize: '12px', opacity: 0.85, marginTop: '2px' }}>
-                    Uploaded: {new Date(manualForm.uploadedAt).toLocaleString()}
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <a href={`${API_URL}${manualForm.filePath}`} target="_blank" rel="noopener noreferrer"
-                  style={{ background: 'white', color: '#667eea', padding: '6px 14px', borderRadius: '8px', fontWeight: '600', fontSize: '13px', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <FontAwesomeIcon icon={faDownload} /> Download
-                </a>
-                <button onClick={handleDeleteManualForm} style={{ background: '#dc2626', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>
-                  <FontAwesomeIcon icon={faTrash} />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Offer Letter Card */}
-          {offerLetter && (
-            <div style={docCard('#11998e 0%, #38ef7d 100%')}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <FontAwesomeIcon icon={faEnvelopeOpen} style={{ fontSize: '24px' }} />
-                <div>
-                  <strong style={{ fontSize: '15px' }}>Offer Letter</strong>
-                  <div style={{ fontSize: '12px', opacity: 0.85, marginTop: '2px' }}>
-                    Uploaded: {new Date(offerLetter.uploadedAt).toLocaleString()}
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <a href={`${API_URL}${offerLetter.filePath}`} target="_blank" rel="noopener noreferrer"
-                  style={{ background: 'white', color: '#11998e', padding: '6px 14px', borderRadius: '8px', fontWeight: '600', fontSize: '13px', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <FontAwesomeIcon icon={faDownload} /> Download
-                </a>
-                <button onClick={handleDeleteOfferLetter} style={{ background: '#dc2626', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>
-                  <FontAwesomeIcon icon={faTrash} />
-                </button>
-              </div>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="counselor-form">
-            {/* Basic Information */}
             <div className="form-section">
-              <h2 className="section-title">Basic Information</h2>
+              <h2 className="section-title">Application Management</h2>
               <div className="row">
                 <div className="col-md-4 mb-3">
                   <label className="form-label">Application Date <span className="required">*</span></label>
@@ -335,184 +261,240 @@ export default function EditApplication({ recordId, viewOnly = false } = {}) {
                 </div>
                 <div className="col-md-8 mb-3">
                   <label className="form-label">Student <span className="required">*</span></label>
-                  <select className="input-field" name="studentId" value={formData.studentId} onChange={handleChange} required>
-                    <option value="">Select Student</option>
-                    {students.map(s => <option key={s.id} value={s.id}>{s.student_id} - {s.name}</option>)}
-                  </select>
+                  <StudentSearchSelect
+                    students={students}
+                    value={formData.studentId}
+                    onChange={(studentId) => setFormData(prev => ({ ...prev, studentId }))}
+                    required
+                  />
                 </div>
               </div>
               <div className="row">
-                <div className="col-md-4 mb-3">
+                <div className="col-md-6 mb-3">
                   <label className="form-label">Country <span className="required">*</span></label>
                   <select className="input-field" name="countryId" value={formData.countryId} onChange={handleChange} required>
                     <option value="">Select Country</option>
                     {countries.map(c => <option key={c.id} value={c.id}>{c.country_name}</option>)}
                   </select>
                 </div>
-                <div className="col-md-4 mb-3">
+                <div className="col-md-6 mb-3">
                   <label className="form-label">University <span className="required">*</span></label>
                   <select className="input-field" name="universityId" value={formData.universityId} onChange={handleChange} required disabled={!formData.countryId}>
                     <option value="">Select University</option>
                     {universities.map(u => <option key={u.id} value={u.id}>{u.university_name}</option>)}
                   </select>
                 </div>
-                <div className="col-md-4 mb-3">
-                  <label className="form-label">Intake <span className="required">*</span></label>
-                  <select className="input-field" name="intakeId" value={formData.intakeId} onChange={handleChange} required disabled={!formData.universityId}>
-                    <option value="">Select Intake</option>
-                    {intakes.map(i => <option key={i.id} value={i.id}>{i.intake_name}</option>)}
-                  </select>
-                </div>
               </div>
               <div className="row">
-                <div className="col-md-12 mb-3">
+                <div className="col-md-6 mb-3">
                   <label className="form-label">Program <span className="required">*</span></label>
-                  <input type="text" className="input-field" name="program" value={formData.program} onChange={handleChange} placeholder="Enter program name" required />
-                </div>
-              </div>
-            </div>
-
-            {/* Application Details */}
-            <div className="form-section">
-              <h2 className="section-title">Application Details</h2>
-              <div className="row">
-                <div className="col-md-6 mb-3">
-                  <label className="form-label">Apps Submitted Through</label>
-                  <input type="text" className="input-field" name="appsSubmittedThrough" value={formData.appsSubmittedThrough} onChange={handleChange} placeholder="Enter submission method" />
+                  <input type="text" className="input-field" name="program" value={formData.program} onChange={handleChange} required />
                 </div>
                 <div className="col-md-6 mb-3">
-                  <label className="form-label">Apps Tagged Through</label>
-                  <input type="text" className="input-field" name="appsTaggedThrough" value={formData.appsTaggedThrough} onChange={handleChange} placeholder="Enter tagging method" />
-                </div>
-              </div>
-              <div className="row">
-                <div className="col-md-4 mb-3">
-                  <label className="form-label">University Fees</label>
-                  <input type="number" step="0.01" className="input-field" name="universityFees" value={formData.universityFees} onChange={handleChange} placeholder="Enter fees amount" />
-                </div>
-                <div className="col-md-4 mb-3">
-                  <label className="form-label">Application Status</label>
-                  <select className="input-field" name="applicationStatus" value={formData.applicationStatus} onChange={handleChange}>
-                    <option value="Pending">Pending</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Accepted">Accepted</option>
-                    <option value="Withdrawn">Withdrawn</option>
-                    <option value="Rejected">Rejected</option>
-                    <option value="Closed">Closed</option>
+                  <label className="form-label">Intake</label>
+                  <select className="input-field" name="intake" value={formData.intake} onChange={handleChange}>
+                    <option value="">Select Intake</option>
+                    {intakeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    {formData.intake && !intakeOptions.includes(formData.intake) && (
+                      <option value={formData.intake}>{formData.intake}</option>
+                    )}
                   </select>
                 </div>
-                <div className="col-md-4 mb-3">
+                {formData.intake === 'Other' && (
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Other Intake</label>
+                    <input type="text" className="input-field" name="intakeOther" value={formData.intakeOther} onChange={handleChange} />
+                  </div>
+                )}
+              </div>
+              <div className="row">
+                <div className="col-md-6 mb-3">
+                  <label className="form-label">Application Submitted Through</label>
+                  <select className="input-field" name="appsSubmittedThrough" value={formData.appsSubmittedThrough} onChange={handleChange}>
+                    <option value="">Select</option>
+                    {APPLICATION_CHANNELS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                </div>
+                {formData.appsSubmittedThrough === 'Other' && (
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Other Submitted Through</label>
+                    <input type="text" className="input-field" name="appsSubmittedThroughOther" value={formData.appsSubmittedThroughOther} onChange={handleChange} />
+                  </div>
+                )}
+                <div className="col-md-6 mb-3">
+                  <label className="form-label">Application Tagged Through</label>
+                  <select className="input-field" name="appsTaggedThrough" value={formData.appsTaggedThrough} onChange={handleChange}>
+                    <option value="">Select</option>
+                    {APPLICATION_CHANNELS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                </div>
+                {formData.appsTaggedThrough === 'Other' && (
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Other Tagged Through</label>
+                    <input type="text" className="input-field" name="appsTaggedThroughOther" value={formData.appsTaggedThroughOther} onChange={handleChange} />
+                  </div>
+                )}
+              </div>
+              <div className="row">
+                <div className="col-md-6 mb-3">
                   <label className="form-label">Tagging Status</label>
                   <select className="input-field" name="taggingStatus" value={formData.taggingStatus} onChange={handleChange}>
-                    <option value="Not Received">Not Received</option>
-                    <option value="Received">Received</option>
+                    {TAGGING_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                </div>
+                <div className="col-md-6 mb-3">
+                  <label className="form-label">Application Status</label>
+                  <select className="input-field" name="applicationStatus" value={formData.applicationStatus} onChange={handleChange}>
+                    {APPLICATION_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    {formData.applicationStatus && !APPLICATION_STATUS_OPTIONS.includes(formData.applicationStatus) && (
+                      <option value={formData.applicationStatus}>{formData.applicationStatus}</option>
+                    )}
                   </select>
                 </div>
               </div>
+              {showOfferLetter && (
+                <div className="row">
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Offer Letter</label>
+                    <select className="input-field" name="offerLetterType" value={formData.offerLetterType} onChange={handleChange}>
+                      <option value="">Select</option>
+                      {OFFER_LETTER_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  </div>
+                  {formData.offerLetterType === 'Other' && (
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label">Other Offer Letter</label>
+                      <input type="text" className="input-field" name="offerLetterOther" value={formData.offerLetterOther} onChange={handleChange} />
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="row">
-                <div className="col-md-4 mb-3">
-                  <label className="form-label">Deposit Paid</label>
-                  <select className="input-field" name="depositPaid" value={formData.depositPaid} onChange={handleChange}>
-                    <option value="No">No</option>
-                    <option value="Yes">Yes</option>
+                <div className="col-md-6 mb-3">
+                  <label className="form-label">University Fees</label>
+                  <input type="text" className="input-field" name="universityFees" value={formData.universityFees} onChange={handleChange} placeholder="e.g. £2,000 or $1,500" />
+                </div>
+                <div className="col-md-6 mb-3">
+                  <label className="form-label">Initial Deposit</label>
+                  <select className="input-field" name="initialDepositStatus" value={formData.initialDepositStatus} onChange={handleChange}>
+                    <option value="">Select</option>
+                    {PAID_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </div>
-                <div className="col-md-4 mb-3">
-                  <label className="form-label">Firm</label>
-                  <input type="text" className="input-field" name="firm" value={formData.firm} onChange={handleChange} placeholder="Enter firm details" />
-                </div>
-                <div className="col-md-4 mb-3">
-                  <label className="form-label">Insurance</label>
-                  <input type="text" className="input-field" name="insurance" value={formData.insurance} onChange={handleChange} placeholder="Enter insurance details" />
-                </div>
+                {formData.initialDepositStatus === 'Paid' && (
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Initial Deposit Amount</label>
+                    <input type="text" className="input-field" name="initialDepositAmount" value={formData.initialDepositAmount} onChange={handleChange} />
+                  </div>
+                )}
               </div>
               <div className="row">
                 <div className="col-md-6 mb-3">
-                  <label className="form-label">Final Choice</label>
-                  <input type="text" className="input-field" name="finalChoice" value={formData.finalChoice} onChange={handleChange} placeholder="Enter final choice" />
+                  <label className="form-label">Enrollment Fee</label>
+                  <select className="input-field" name="enrollmentFeeStatus" value={formData.enrollmentFeeStatus} onChange={handleChange}>
+                    <option value="">Select</option>
+                    {PAID_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
                 </div>
+                {formData.enrollmentFeeStatus === 'Paid' && (
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Enrollment Fee Amount</label>
+                    <input type="text" className="input-field" name="enrollmentFeeAmount" value={formData.enrollmentFeeAmount} onChange={handleChange} />
+                  </div>
+                )}
+                <div className="col-md-6 mb-3">
+                  <label className="form-label">Tuition Fee</label>
+                  <select className="input-field" name="tuitionFeeStatus" value={formData.tuitionFeeStatus} onChange={handleChange}>
+                    <option value="">Select</option>
+                    {TUITION_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                </div>
+                {formData.tuitionFeeStatus === 'Paid' && (
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Tuition Fee Amount</label>
+                    <input type="text" className="input-field" name="tuitionFeeAmount" value={formData.tuitionFeeAmount} onChange={handleChange} />
+                  </div>
+                )}
               </div>
               <div className="row">
                 <div className="col-md-12 mb-3">
-                  <label className="form-label">Condition</label>
-                  <textarea className="input-field" name="condition" value={formData.condition} onChange={handleChange} rows="3" placeholder="Enter any conditions" />
+                  <label className="form-label">Conditions</label>
+                  <textarea className="input-field" name="condition" value={formData.condition} onChange={handleChange} rows="3" />
                 </div>
               </div>
               <div className="row">
                 <div className="col-md-12 mb-3">
                   <label className="form-label">Remarks</label>
-                  <textarea className="input-field" name="remarks" value={formData.remarks} onChange={handleChange} rows="3" placeholder="Enter any remarks or notes" />
+                  <textarea className="input-field" name="remarks" value={formData.remarks} onChange={handleChange} rows="3" />
                 </div>
               </div>
             </div>
 
-            <div className="form-actions">
-              <button type="button" className="btn-secondary" onClick={() => navigate('/applications')} disabled={loading}>
-                <FontAwesomeIcon icon={faTimes} /> Cancel
-              </button>
-              <button type="submit" className="btn-primary" disabled={loading}>
-                <FontAwesomeIcon icon={faSave} /> {loading ? 'Updating...' : 'Update Application'}
-              </button>
+            <div className="form-section">
+              <h2 className="section-title">Documents Submission</h2>
+              <div className="row g-3">
+                {APPLICATION_DOCUMENT_TYPES.map((type) => {
+                  const files = docsForType(type);
+                  return (
+                    <div key={type} className="col-md-6">
+                      <div style={{
+                        border: files.length ? '2px solid #22c55e' : '2px dashed #d1d5db',
+                        borderRadius: '12px', padding: '16px', background: files.length ? '#f0fdf4' : '#fafafa'
+                      }}>
+                        <div style={{ fontWeight: 600, marginBottom: '8px' }}>{type}</div>
+                        {files.map((doc) => (
+                          <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '12px', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {doc.original_name || 'Uploaded file'}
+                            </span>
+                            <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                              <a href={`${API_URL}${doc.file_path}`} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm">
+                                <FontAwesomeIcon icon={faDownload} />
+                              </a>
+                              {!viewOnly && (
+                                <button type="button" className="btn-icon btn-delete" onClick={() => handleDeleteDocument(doc.id)}>
+                                  <FontAwesomeIcon icon={faTrash} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {!viewOnly && (
+                          <label className="btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }}>
+                            <FontAwesomeIcon icon={faUpload} /> {uploadingType === type ? 'Uploading...' : 'Upload'}
+                            <input
+                              type="file"
+                              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                              style={{ display: 'none' }}
+                              disabled={uploadingType === type}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                e.target.value = '';
+                                if (file) handleDocumentUpload(type, file);
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+
+            {!viewOnly && (
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => navigate('/applications')} disabled={loading}>
+                  <FontAwesomeIcon icon={faTimes} /> Cancel
+                </button>
+                <button type="submit" className="btn-primary" disabled={loading}>
+                  <FontAwesomeIcon icon={faSave} /> {loading ? 'Updating...' : 'Update Application'}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       </div>
-
-      {/* Upload Modal */}
-      {showUploadModal && (
-        <>
-          <div className="modal-backdrop show" onClick={() => !uploadingFile && setShowUploadModal(false)}></div>
-          <div className="modal show" style={{ display: 'block' }} tabIndex="-1">
-            <div className="modal-dialog modal-dialog-centered">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">
-                    <FontAwesomeIcon icon={uploadType === 'manual' ? faFileUpload : faEnvelopeOpen} style={{ marginRight: '10px' }} />
-                    Upload {uploadType === 'manual' ? 'Manual Form' : 'Offer Letter'}
-                  </h5>
-                  <button type="button" className="btn-close-modal" onClick={() => setShowUploadModal(false)} disabled={uploadingFile}>
-                    <FontAwesomeIcon icon={faTimes} />
-                  </button>
-                </div>
-                <form onSubmit={handleFileUpload}>
-                  <div className="modal-body">
-                    {/* Toggle */}
-                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                      <button type="button" onClick={() => setUploadType('manual')}
-                        style={{ flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px', border: uploadType === 'manual' ? '2px solid #F47B20' : '2px solid #e5e7eb', background: uploadType === 'manual' ? '#fff7ed' : '#f9fafb', color: uploadType === 'manual' ? '#F47B20' : '#6b7280' }}>
-                        <FontAwesomeIcon icon={faFileUpload} style={{ marginRight: '6px' }} /> Manual Form
-                      </button>
-                      <button type="button" onClick={() => setUploadType('offer')}
-                        style={{ flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px', border: uploadType === 'offer' ? '2px solid #F47B20' : '2px solid #e5e7eb', background: uploadType === 'offer' ? '#fff7ed' : '#f9fafb', color: uploadType === 'offer' ? '#F47B20' : '#6b7280' }}>
-                        <FontAwesomeIcon icon={faEnvelopeOpen} style={{ marginRight: '6px' }} /> Offer Letter
-                      </button>
-                    </div>
-
-                    <div className="modal-form-group">
-                      <label>Select {uploadType === 'manual' ? 'Manual Form' : 'Offer Letter'} <span className="required">*</span></label>
-                      <input type="file" className="input-field" onChange={(e) => setSelectedFile(e.target.files[0])} accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" required />
-                      <small style={{ display: 'block', marginTop: '8px', color: '#6b7280', fontSize: '12px' }}>
-                        Accepted formats: PDF, DOC, DOCX, JPG, PNG (Max 10MB)
-                      </small>
-                      {((uploadType === 'manual' && manualForm) || (uploadType === 'offer' && offerLetter)) && (
-                        <div style={{ marginTop: '12px', padding: '12px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px', fontSize: '13px' }}>
-                          <strong>Note:</strong> Uploading a new file will replace the existing one.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="modal-footer">
-                    <button type="button" className="btn-secondary" onClick={() => setShowUploadModal(false)} disabled={uploadingFile}>Cancel</button>
-                    <button type="submit" className="btn-primary" disabled={uploadingFile}>
-                      <FontAwesomeIcon icon={faUpload} /> {uploadingFile ? 'Uploading...' : 'Upload'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
     </ViewModeWrap>
   );
 }

@@ -39,6 +39,7 @@ import EditVisa from "./pages/EditVisa";
 import ViewStudentApplications from './pages/ViewStudentApplications';
 
 import Finance from "./pages/Finance";
+import FinanceOverview from "./pages/FinanceOverview";
 import CreateInvoice from "./pages/CreateInvoice";
 import BankAccounts from "./pages/BankAccounts";
 import InvoicePdf from "./pages/InvoicePdf";
@@ -254,6 +255,14 @@ root.render(
             path="/finance"
             element={
               <ProtectedRoute allowedRoles={['admin', 'consultant']}>
+                <FinanceOverview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/finance/invoices"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'consultant']}>
                 <Finance />
               </ProtectedRoute>
             }
@@ -263,6 +272,14 @@ root.render(
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <BankAccounts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/finance/expenses"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <Expenses />
               </ProtectedRoute>
             }
           />

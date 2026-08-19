@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faHome,
@@ -13,16 +13,18 @@ import {
   faUserTie,
   faChevronDown,
   faChevronUp,
-  faReceipt,
-  faMoneyBillWave
 } from "@fortawesome/free-solid-svg-icons";
 import LogoutButton from '../components/LogoutButton'
 
 
 export default function Sidebar() {
+    const location = useLocation();
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [isLeadMenuOpen, setIsLeadMenuOpen] = useState(false);
     const [isMasterDataMenuOpen, setIsMasterDataMenuOpen] = useState(false);
+    const [isFinanceMenuOpen, setIsFinanceMenuOpen] = useState(
+      location.pathname.startsWith('/finance') || location.pathname.startsWith('/expenses') || location.pathname.startsWith('/create-invoice')
+    );
 
     useEffect(() => {
         const handleToggle = () => setIsCollapsed(prev => !prev);
@@ -30,8 +32,21 @@ export default function Sidebar() {
         return () => window.removeEventListener('toggleSidebar', handleToggle);
     }, []);
 
+    useEffect(() => {
+        if (
+          location.pathname.startsWith('/finance') ||
+          location.pathname.startsWith('/expenses') ||
+          location.pathname.startsWith('/create-invoice') ||
+          location.pathname.startsWith('/invoice-pdf') ||
+          location.pathname.startsWith('/payment-receipt')
+        ) {
+            setIsFinanceMenuOpen(true);
+        }
+    }, [location.pathname]);
+
     const toggleLeadMenu = () => setIsLeadMenuOpen(prev => !prev);
     const toggleMasterDataMenu = () => setIsMasterDataMenuOpen(prev => !prev);
+    const toggleFinanceMenu = () => setIsFinanceMenuOpen(prev => !prev);
 
     return (
         <>
@@ -101,10 +116,30 @@ export default function Sidebar() {
                         </Link>
                     </li>
                     <li className="menu-item">
-                        <Link to="/finance">
-                            <FontAwesomeIcon icon={faWallet} />
-                            <span>Finance</span>
-                        </Link>
+                        <div className="menu-item-parent" onClick={toggleFinanceMenu}>
+                            <div className="menu-item-content">
+                                <FontAwesomeIcon icon={faWallet} />
+                                <span>Finance</span>
+                            </div>
+                            <FontAwesomeIcon
+                                icon={isFinanceMenuOpen ? faChevronUp : faChevronDown}
+                                className="submenu-arrow"
+                            />
+                        </div>
+                        <ul className={`submenu ${isFinanceMenuOpen ? 'open' : ''}`}>
+                            <li>
+                                <Link to="/finance"><span>Finance Overview</span></Link>
+                            </li>
+                            <li>
+                                <Link to="/finance/invoices"><span>Manage Invoices</span></Link>
+                            </li>
+                            <li>
+                                <Link to="/finance/bank-accounts"><span>Manage Bank Account</span></Link>
+                            </li>
+                            <li>
+                                <Link to="/finance/expenses"><span>Manage Expenses</span></Link>
+                            </li>
+                        </ul>
                     </li>
                     <li className="menu-item">
                         <Link to="/visitor-logs">
@@ -121,12 +156,6 @@ export default function Sidebar() {
                         <Link to="/employees">
                             <FontAwesomeIcon icon={faUsers} />
                             <span>HR &mdash; Employees</span>
-                        </Link>
-                    </li>
-                    <li className="menu-item">
-                        <Link to="/expenses">
-                            <FontAwesomeIcon icon={faReceipt} />
-                            <span>Expense Management</span>
                         </Link>
                     </li>
 
@@ -199,7 +228,7 @@ export default function Sidebar() {
                 }
 
                 .submenu.open {
-                    max-height: 200px;
+                    max-height: 280px;
                 }
 
                 .submenu li {

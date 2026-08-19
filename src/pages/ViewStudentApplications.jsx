@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import '../styles/dashboard.css';
 import '../styles/applications.css';
 import Sidebar from '../components/Sidebar';
@@ -8,14 +8,16 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faFileAlt, faArrowLeft, faDownload, faGlobe, faUniversity,
   faCalendarAlt, faCheckCircle, faClock, faTimesCircle,
-  faExclamationCircle, faUser, faEnvelopeOpen, faFileUpload,
-  faBan, faLayerGroup, faDollarSign, faInfoCircle, faStickyNote,
+  faExclamationCircle, faUser,
+  faBan, faInfoCircle, faStickyNote, faSpinner,
 } from '@fortawesome/free-solid-svg-icons';
+import { displayFeeStatus, displayOtherOption, normalizeTaggingStatus } from '../constants/applicationOptions';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://unilinkapi-production.up.railway.app';
 
 // ── Status badge config ──────────────────────────────────────────────────────
 const STATUS_CONFIG = {
+  'In Progress': { bg: '#ffedd5', color: '#9a3412', icon: faSpinner },
   Pending:   { bg: '#fef9c3', color: '#854d0e', icon: faClock },
   Approved:  { bg: '#dcfce7', color: '#166534', icon: faCheckCircle },
   Accepted:  { bg: '#dbeafe', color: '#1e40af', icon: faCheckCircle },
@@ -25,6 +27,8 @@ const STATUS_CONFIG = {
 };
 
 const TAGGING_CONFIG = {
+  'Tagged':       { bg: '#dcfce7', color: '#166534' },
+  'Not Tagged':   { bg: '#fef9c3', color: '#854d0e' },
   'Received':     { bg: '#dcfce7', color: '#166534' },
   'Not Received': { bg: '#fef9c3', color: '#854d0e' },
 };
@@ -120,7 +124,6 @@ export default function ViewStudentApplications() {
           }
         }
 
-        // 3. Fetch manual-form + offer-letter status for every application
         await fetchAllDocuments(data.applications);
       } catch (err) {
         setError('Network error. Please check your connection.');
@@ -135,17 +138,13 @@ export default function ViewStudentApplications() {
   const fetchAllDocuments = async (apps) => {
     const entries = await Promise.all(
       apps.map(async (app) => {
-        const [mfRes, olRes] = await Promise.allSettled([
-          fetch(`${API_URL}/applications/${app.id}/manual-form`).then(r => r.json()),
-          fetch(`${API_URL}/applications/${app.id}/offer-letter`).then(r => r.json()),
-        ]);
-        return [
-          app.id,
-          {
-            manualForm:  mfRes.status === 'fulfilled' && mfRes.value.success ? mfRes.value.manualForm  : null,
-            offerLetter: olRes.status === 'fulfilled' && olRes.value.success ? olRes.value.offerLetter : null,
-          },
-        ];
+        try {
+          const res = await fetch(`${API_URL}/applications/${app.id}/documents`);
+          const data = await res.json();
+          return [app.id, data.success ? (data.documents || []) : []];
+        } catch {
+          return [app.id, []];
+        }
       })
     );
     setDocMap(Object.fromEntries(entries));
@@ -162,9 +161,6 @@ export default function ViewStudentApplications() {
     if (!val) return '—';
     return new Date(val).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
-
-  const formatCurrency = (val) =>
-    val ? `PKR ${Number(val).toLocaleString()}` : null;
 
   // ── Loading / error states ──────────────────────────────────────────────
   if (loading) {
@@ -315,10 +311,14 @@ export default function ViewStudentApplications() {
 
           {/* ── Application cards ────────────────────────────────────────── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {applications.map((app, idx) => {
-              const docs = docMap[app.id] || {};
+            {applications.map((app) => {
+              const docs = docMap[app.id] || [];
               const statusCfg = STATUS_CONFIG[app.application_status] || {};
-              const taggingCfg = TAGGING_CONFIG[app.tagging_status] || {};
+              const taggingStatus = normalizeTaggingStatus(app.tagging_status);
+              const taggingCfg = TAGGING_CONFIG[taggingStatus] || {};
+              const submitted = displayOtherOption(app.apps_submitted_through, app.apps_submitted_through_other);
+              const tagged = displayOtherOption(app.apps_tagged_through, app.apps_tagged_through_other);
+              const offerLetter = displayOtherOption(app.offer_letter_type, app.offer_letter_other);
 
               return (
                 <div key={app.id} style={{
@@ -392,15 +392,23 @@ export default function ViewStudentApplications() {
 
                     {/* Row 2 — Status pills */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '14px' }}>
-                      <InfoPill label="Tagging Status" value={app.tagging_status} color={taggingCfg.color || '#374151'} />
-                      <InfoPill label="Deposit Paid" value={app.deposit_paid} color={app.deposit_paid === 'Yes' ? '#166534' : '#991b1b'} />
-                      {app.apps_submitted_through && <InfoPill label="Submitted Through" value={app.apps_submitted_through} />}
-                      {app.apps_tagged_through    && <InfoPill label="Tagged Through"    value={app.apps_tagged_through} />}
-                      {app.firm                   && <InfoPill label="Firm"               value={app.firm} />}
-                      {app.insurance              && <InfoPill label="Insurance"          value={app.insurance} />}
-                      {app.final_choice           && <InfoPill label="Final Choice"       value={app.final_choice} />}
-                      {app.university_fees        && (
-                        <InfoPill label="University Fees" value={formatCurrency(app.university_fees)} color="#166534" />
+                      <InfoPill label="Tagging Status" value={taggingStatus} color={taggingCfg.color || '#374151'} />
+                      {submitted && <InfoPill label="Submitted Through" value={submitted} />}
+                      {tagged && <InfoPill label="Tagged Through" value={tagged} />}
+                      {offerLetter && app.application_status === 'Accepted' && (
+                        <InfoPill label="Offer Letter" value={offerLetter} />
+                      )}
+                      {app.university_fees && (
+                        <InfoPill label="University Fees" value={app.university_fees} color="#166534" />
+                      )}
+                      {app.initial_deposit_status && (
+                        <InfoPill label="Initial Deposit" value={displayFeeStatus(app.initial_deposit_status, app.initial_deposit_amount)} />
+                      )}
+                      {app.enrollment_fee_status && (
+                        <InfoPill label="Enrollment Fee" value={displayFeeStatus(app.enrollment_fee_status, app.enrollment_fee_amount)} />
+                      )}
+                      {app.tuition_fee_status && (
+                        <InfoPill label="Tuition Fee" value={displayFeeStatus(app.tuition_fee_status, app.tuition_fee_amount)} />
                       )}
                     </div>
 
@@ -429,27 +437,21 @@ export default function ViewStudentApplications() {
                     )}
 
                     {/* Documents row */}
-                    {(docs.manualForm || docs.offerLetter) && (
+                    {docs.length > 0 && (
                       <>
                         <div style={{ borderTop: '1px dashed #e5e7eb', margin: '10px 0 12px' }} />
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600', marginRight: '4px' }}>
                             Documents:
                           </span>
-                          {docs.manualForm && (
+                          {docs.map((doc) => (
                             <DocDownloadBtn
-                              href={`${API_URL}${docs.manualForm.filePath}`}
-                              label="Manual Form"
+                              key={doc.id}
+                              href={`${API_URL}${doc.file_path}`}
+                              label={doc.document_type || doc.original_name || 'Document'}
                               iconColor="#7c3aed"
                             />
-                          )}
-                          {docs.offerLetter && (
-                            <DocDownloadBtn
-                              href={`${API_URL}${docs.offerLetter.filePath}`}
-                              label="Offer Letter"
-                              iconColor="#059669"
-                            />
-                          )}
+                          ))}
                         </div>
                       </>
                     )}

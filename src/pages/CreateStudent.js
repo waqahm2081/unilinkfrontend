@@ -39,13 +39,27 @@ const emptyEmergencyContact = {
 
 const emptyFamilyMember = (type) => ({
   type, full_name: '', relation: type === 'Father' ? 'Father' : type === 'Mother' ? 'Mother' : '',
-  contact_no: '', email: '', profession: '', address: '', sponsor_note: ''
+  contact_no: '', email: '', profession: '', address: '', postal_code: '', sponsor_note: ''
 });
 
 const emptyEducation = () => ({
   id: Date.now() + Math.random(),
   education_level: '', institute_name: '', start_date: '', end_date: '',
-  result: '', subjects: '', cgpa: '', remarks: ''
+  subjects: '', grade_cgpa: ''
+});
+
+const toMonthValue = (value) => {
+  if (!value) return '';
+  const raw = String(value).split('T')[0];
+  return raw.length >= 7 ? raw.slice(0, 7) : raw;
+};
+
+const normalizeEducationEntry = (entry) => ({
+  ...entry,
+  id: entry.id || Date.now() + Math.random(),
+  grade_cgpa: entry.grade_cgpa || entry.result || entry.cgpa || '',
+  start_date: toMonthValue(entry.start_date),
+  end_date: toMonthValue(entry.end_date),
 });
 
 const emptyActivity = () => ({
@@ -60,8 +74,31 @@ const emptyAward = () => ({
 
 const emptyWork = () => ({
   id: Date.now() + Math.random(),
-  company_name: '', designation: '', date_from: '', date_to: '', duration: '',
-  employment_type: '', relation: ''
+  company_name: '', designation: '', date_from: '', date_to: '', employment_type: ''
+});
+
+const emptyIntendedProgram = () => ({
+  id: Date.now() + Math.random(),
+  country_id: '', university_id: '', program_name: '', study_mode: ''
+});
+
+const normalizeIntendedProgram = (entry) => ({
+  ...entry,
+  id: entry.id || Date.now() + Math.random(),
+  country_id: entry.country_id ? String(entry.country_id) : '',
+  university_id: entry.university_id ? String(entry.university_id) : '',
+  program_name: entry.program_name || '',
+  study_mode: entry.study_mode || '',
+});
+
+const INTAKE_SESSION_OPTIONS = ['Jan / Feb', 'Apr / May', 'Jun / Jul', 'Aug / Sept'];
+const INTAKE_YEAR_OPTIONS = Array.from({ length: 8 }, (_, i) => String(new Date().getFullYear() - 1 + i));
+
+const normalizeWorkEntry = (entry) => ({
+  ...entry,
+  id: entry.id || Date.now() + Math.random(),
+  date_from: toMonthValue(entry.date_from),
+  date_to: toMonthValue(entry.date_to),
 });
 
 export default function CreateStudent() {
@@ -87,7 +124,8 @@ export default function CreateStudent() {
     address: '', postal_code: '', mobile: '', landline: '',
     email: '', alternative_email: '',
     country: '', course: '',
-    source_inquiry: '', status: 'Active'
+    source_inquiry: '', status: 'Active',
+    intake_session: '', intake_year: ''
   });
 
   const [emergencyContact, setEmergencyContact] = useState({ ...emptyEmergencyContact });
@@ -105,6 +143,8 @@ export default function CreateStudent() {
   const [activities, setActivities] = useState([]);
   const [awards, setAwards] = useState([]);
   const [workExperiences, setWorkExperiences] = useState([]);
+  const [intendedPrograms, setIntendedPrograms] = useState([]);
+  const [universitiesByCountry, setUniversitiesByCountry] = useState({});
   const [passportNumbers, setPassportNumbers] = useState(['']);
   const [profilePictureFile, setProfilePictureFile] = useState(null);
   const [profilePicturePreview, setProfilePicturePreview] = useState('');
@@ -112,6 +152,10 @@ export default function CreateStudent() {
   useEffect(() => {
     fetchCountries();
   }, []);
+
+  useEffect(() => {
+    fetchUniversitiesForAssignedCountries(assignedCountryIds);
+  }, [assignedCountryIds]);
 
   useEffect(() => {
     if (showAssignCountriesModal) {
@@ -138,6 +182,7 @@ export default function CreateStudent() {
         email: source.email || '',
         profession: source.profession || '',
         address: source.address || '',
+        postal_code: source.postal_code || '',
       };
       if (
         current &&
@@ -146,7 +191,8 @@ export default function CreateStudent() {
         current.contact_no === next.contact_no &&
         current.email === next.email &&
         current.profession === next.profession &&
-        current.address === next.address
+        current.address === next.address &&
+        current.postal_code === next.postal_code
       ) {
         return prev;
       }
@@ -154,8 +200,8 @@ export default function CreateStudent() {
     });
   }, [
     sponsorRelationType,
-    fatherMember.full_name, fatherMember.contact_no, fatherMember.email, fatherMember.profession, fatherMember.address,
-    motherMember.full_name, motherMember.contact_no, motherMember.email, motherMember.profession, motherMember.address,
+    fatherMember.full_name, fatherMember.contact_no, fatherMember.email, fatherMember.profession, fatherMember.address, fatherMember.postal_code,
+    motherMember.full_name, motherMember.contact_no, motherMember.email, motherMember.profession, motherMember.address, motherMember.postal_code,
   ]);
 
   useEffect(() => {
@@ -180,13 +226,15 @@ export default function CreateStudent() {
         contact_no: source.contact_no || '',
         email: source.email || '',
         address: source.address || '',
+        postal_code: source.postal_code || '',
       };
       if (
         prev.full_name === next.full_name &&
         prev.relation === next.relation &&
         prev.contact_no === next.contact_no &&
         prev.email === next.email &&
-        prev.address === next.address
+        prev.address === next.address &&
+        prev.postal_code === next.postal_code
       ) {
         return prev;
       }
@@ -194,9 +242,9 @@ export default function CreateStudent() {
     });
   }, [
     emergencyRelationType,
-    fatherMember.full_name, fatherMember.contact_no, fatherMember.email, fatherMember.address,
-    motherMember.full_name, motherMember.contact_no, motherMember.email, motherMember.address,
-    sponsorMember.full_name, sponsorMember.contact_no, sponsorMember.email, sponsorMember.address, sponsorMember.relation,
+    fatherMember.full_name, fatherMember.contact_no, fatherMember.email, fatherMember.address, fatherMember.postal_code,
+    motherMember.full_name, motherMember.contact_no, motherMember.email, motherMember.address, motherMember.postal_code,
+    sponsorMember.full_name, sponsorMember.contact_no, sponsorMember.email, sponsorMember.address, sponsorMember.postal_code, sponsorMember.relation,
   ]);
 
   const fetchCountries = async () => {
@@ -206,6 +254,27 @@ export default function CreateStudent() {
       if (data.success) setAllCountries(data.countries.filter(c => c.status === 'Active'));
     } catch (err) {
       console.error('Error fetching countries:', err);
+    }
+  };
+
+  const fetchUniversitiesForAssignedCountries = async (countryIds) => {
+    const ids = countryIds || assignedCountryIds;
+    if (!ids.length) {
+      setUniversitiesByCountry({});
+      return;
+    }
+    try {
+      const results = {};
+      await Promise.all(ids.map(async (countryId) => {
+        const res = await fetch(`${API_URL}/universities/by-country/${countryId}`);
+        const data = await res.json();
+        results[String(countryId)] = data.success
+          ? (data.universities || []).filter(u => u.status === 'Active' || !u.status)
+          : [];
+      }));
+      setUniversitiesByCountry(results);
+    } catch (err) {
+      console.error('Error fetching universities:', err);
     }
   };
 
@@ -222,7 +291,7 @@ export default function CreateStudent() {
 
   const handleFamilyChange = (index, field, value) => {
     const memberType = familyDetails[index]?.type;
-    if (memberType === 'Sponsor' && sponsorLocked && field !== 'sponsor_note') return;
+    if (memberType === 'Sponsor' && sponsorLocked) return;
     setFamilyDetails(prev => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
@@ -235,7 +304,7 @@ export default function CreateStudent() {
     if (newType === 'Guardian') {
       setFamilyDetails(prev => prev.map(m =>
         m.type === 'Sponsor'
-          ? { ...m, full_name: '', relation: '', contact_no: '', email: '', profession: '', address: '', sponsor_note: '' }
+          ? { ...m, full_name: '', relation: '', contact_no: '', email: '', profession: '', address: '', postal_code: '', sponsor_note: '' }
           : m
       ));
     }
@@ -264,6 +333,16 @@ export default function CreateStudent() {
   const removeWork = (id) => setWorkExperiences(prev => prev.filter(w => w.id !== id));
   const handleWorkChange = (id, field, value) =>
     setWorkExperiences(prev => prev.map(w => w.id === id ? { ...w, [field]: value } : w));
+
+  const addIntendedProgram = () => setIntendedPrograms(prev => [...prev, emptyIntendedProgram()]);
+  const removeIntendedProgram = (id) => setIntendedPrograms(prev => prev.filter(p => p.id !== id));
+  const handleIntendedProgramChange = (id, field, value) => {
+    setIntendedPrograms(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      if (field === 'country_id') return { ...p, country_id: value, university_id: '' };
+      return { ...p, [field]: value };
+    }));
+  };
 
   const handleTempCountryToggle = (countryId) => {
     setTempSelectedCountryIds(prev =>
@@ -361,7 +440,10 @@ export default function CreateStudent() {
           education: educationEntries,
           activities,
           awards,
-          workExperience: workExperiences
+          workExperience: workExperiences,
+          intendedPrograms,
+          intakeSession: studentData.intake_session,
+          intakeYear: studentData.intake_year
         })
       });
       const data = await response.json();
@@ -526,41 +608,20 @@ export default function CreateStudent() {
                   </div>
                 </div>
 
+                <div className="col-md-12">
+                  <div className="form-group">
+                    <label>Date of Birth <span className="required">*</span></label>
+                    <input type="date" name="dob" className="input-field form-control"
+                      value={studentData.dob || ''} onChange={handleInputChange} required />
+                  </div>
+                </div>
+
                 <div className="col-md-4">
                   <div className="form-group">
                     <label>Nationality</label>
                     <input type="text" name="nationality" className="input-field form-control"
                       value={studentData.nationality || ''} onChange={handleInputChange}
                       placeholder="e.g. Pakistani" />
-                  </div>
-                </div>
-                <div className="col-md-4">
-                  <div className="form-group">
-                    <label>Marital Status</label>
-                    <select name="marital_status" className="input-field form-control"
-                      value={studentData.marital_status || ''} onChange={handleInputChange}>
-                      <option value="">Select</option>
-                      {MARITAL_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div className="col-md-4">
-                  <div className="form-group">
-                    <label>Gender</label>
-                    <select name="gender" className="input-field form-control"
-                      value={studentData.gender || ''} onChange={handleInputChange}>
-                      <option value="">Select</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="col-md-4">
-                  <div className="form-group">
-                    <label>Date of Birth <span className="required">*</span></label>
-                    <input type="date" name="dob" className="input-field form-control"
-                      value={studentData.dob || ''} onChange={handleInputChange} required />
                   </div>
                 </div>
                 <div className="col-md-4">
@@ -608,14 +669,6 @@ export default function CreateStudent() {
                         )}
                       </div>
                     ))}
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      style={{ marginTop: '8px', fontSize: '12px' }}
-                      onClick={() => setPassportNumbers([...passportNumbers, ''])}
-                    >
-                      <FontAwesomeIcon icon={faPlus} /> Add Passport Number
-                    </button>
                   </div>
                 </div>
                 <div className="col-md-4">
@@ -630,6 +683,40 @@ export default function CreateStudent() {
                     <label>Place of Issue</label>
                     <input type="text" name="passport_place_of_issue" className="input-field form-control"
                       value={studentData.passport_place_of_issue || ''} onChange={handleInputChange} />
+                  </div>
+                </div>
+                <div className="col-md-12">
+                  <div className="form-group">
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      style={{ fontSize: '12px' }}
+                      onClick={() => setPassportNumbers([...passportNumbers, ''])}
+                    >
+                      <FontAwesomeIcon icon={faPlus} /> Add Passport Number
+                    </button>
+                  </div>
+                </div>
+
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Gender</label>
+                    <select name="gender" className="input-field form-control"
+                      value={studentData.gender || ''} onChange={handleInputChange}>
+                      <option value="">Select</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Marital Status</label>
+                    <select name="marital_status" className="input-field form-control"
+                      value={studentData.marital_status || ''} onChange={handleInputChange}>
+                      <option value="">Select</option>
+                      {MARITAL_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
                   </div>
                 </div>
 
@@ -648,14 +735,14 @@ export default function CreateStudent() {
                   </div>
                 </div>
 
-                <div className="col-md-4">
+                <div className="col-md-6">
                   <div className="form-group">
                     <label>Mobile No. <span className="required">*</span></label>
                     <input type="tel" name="mobile" className="input-field form-control"
                       value={studentData.mobile} onChange={handleInputChange} required />
                   </div>
                 </div>
-                <div className="col-md-4">
+                <div className="col-md-6">
                   <div className="form-group">
                     <label>Landline No.</label>
                     <input type="tel" name="landline" className="input-field form-control"
@@ -769,12 +856,20 @@ export default function CreateStudent() {
                               onChange={e => handleFamilyChange(index, 'email', e.target.value)} />
                           </div>
                         </div>
-                        <div className="col-md-12">
+                        <div className="col-md-9">
                           <div className="form-group">
                             <label>Current Residential Address</label>
                             <textarea className="input-field form-control" rows="2"
                               value={member.address || ''}
                               onChange={e => handleFamilyChange(index, 'address', e.target.value)}></textarea>
+                          </div>
+                        </div>
+                        <div className="col-md-3">
+                          <div className="form-group">
+                            <label>Postal Code</label>
+                            <input type="text" className="input-field form-control"
+                              value={member.postal_code || ''}
+                              onChange={e => handleFamilyChange(index, 'postal_code', e.target.value)} />
                           </div>
                         </div>
                       </div>
@@ -826,12 +921,20 @@ export default function CreateStudent() {
                               onChange={e => handleFamilyChange(index, 'email', e.target.value)} />
                           </div>
                         </div>
-                        <div className="col-md-12">
+                        <div className="col-md-9">
                           <div className="form-group">
                             <label>Current Residential Address</label>
                             <textarea className="input-field form-control" rows="2"
                               value={member.address || ''}
                               onChange={e => handleFamilyChange(index, 'address', e.target.value)}></textarea>
+                          </div>
+                        </div>
+                        <div className="col-md-3">
+                          <div className="form-group">
+                            <label>Postal Code</label>
+                            <input type="text" className="input-field form-control"
+                              value={member.postal_code || ''}
+                              onChange={e => handleFamilyChange(index, 'postal_code', e.target.value)} />
                           </div>
                         </div>
                       </div>
@@ -895,16 +998,6 @@ export default function CreateStudent() {
                       </div>
                       <div className="col-md-4">
                         <div className="form-group">
-                          <label>Profession</label>
-                          <input type="text" className="input-field form-control"
-                            value={member.profession || ''}
-                            onChange={e => handleFamilyChange(sponsorIndex, 'profession', e.target.value)}
-                            readOnly={sponsorLocked}
-                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
-                        </div>
-                      </div>
-                      <div className="col-md-4">
-                        <div className="form-group">
                           <label>Contact No.</label>
                           <input type="tel" className="input-field form-control"
                             value={member.contact_no || ''}
@@ -913,7 +1006,7 @@ export default function CreateStudent() {
                             style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
                         </div>
                       </div>
-                      <div className="col-md-8">
+                      <div className="col-md-4">
                         <div className="form-group">
                           <label>Email</label>
                           <input type="email" className="input-field form-control"
@@ -923,7 +1016,17 @@ export default function CreateStudent() {
                             style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
                         </div>
                       </div>
-                      <div className="col-md-12">
+                      <div className="col-md-4">
+                        <div className="form-group">
+                          <label>Profession</label>
+                          <input type="text" className="input-field form-control"
+                            value={member.profession || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'profession', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
+                        </div>
+                      </div>
+                      <div className="col-md-9">
                         <div className="form-group">
                           <label>Current Residential Address</label>
                           <textarea className="input-field form-control" rows="2"
@@ -933,13 +1036,14 @@ export default function CreateStudent() {
                             style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined}></textarea>
                         </div>
                       </div>
-                      <div className="col-md-12">
+                      <div className="col-md-3">
                         <div className="form-group">
-                          <label>Additional Notes</label>
+                          <label>Postal Code</label>
                           <input type="text" className="input-field form-control"
-                            placeholder="Any additional notes about the sponsor"
-                            value={member.sponsor_note || ''}
-                            onChange={e => handleFamilyChange(sponsorIndex, 'sponsor_note', e.target.value)} />
+                            value={member.postal_code || ''}
+                            onChange={e => handleFamilyChange(sponsorIndex, 'postal_code', e.target.value)}
+                            readOnly={sponsorLocked}
+                            style={sponsorLocked ? { background: '#f3f4f6', cursor: 'not-allowed' } : undefined} />
                         </div>
                       </div>
                     </div>
@@ -1100,69 +1204,53 @@ export default function CreateStudent() {
                     <div className="row">
                       <div className="col-md-6">
                         <div className="form-group">
-                          <label>Name of Qualification</label>
-                          <select className="input-field form-control"
-                            value={entry.education_level}
-                            onChange={e => handleEduChange(entry.id, 'education_level', e.target.value)}>
-                            <option value="">Select Level</option>
-                            <option value="10th">10th</option>
-                            <option value="12th">12th</option>
-                            <option value="ug">UG (Undergraduate)</option>
-                            <option value="pg">PG (Postgraduate)</option>
-                            <option value="diploma">Diploma</option>
-                            <option value="other">Other</option>
-                          </select>
+                          <label>Qualification</label>
+                          <input type="text" className="input-field form-control"
+                            value={entry.education_level || ''}
+                            onChange={e => handleEduChange(entry.id, 'education_level', e.target.value)}
+                            placeholder="e.g. 12th, Bachelor of Science" />
                         </div>
                       </div>
                       <div className="col-md-6">
                         <div className="form-group">
-                          <label>Name of Institution</label>
+                          <label>Institution</label>
                           <input type="text" className="input-field form-control"
-                            value={entry.institute_name}
+                            value={entry.institute_name || ''}
                             onChange={e => handleEduChange(entry.id, 'institute_name', e.target.value)} />
                         </div>
                       </div>
-                      <div className="col-md-3">
+                      <div className="col-md-6">
                         <div className="form-group">
-                          <label>Duration From</label>
-                          <input type="date" className="input-field form-control"
+                          <label>Duration From (Month &amp; Year)</label>
+                          <input type="month" className="input-field form-control"
                             value={entry.start_date || ''}
                             onChange={e => handleEduChange(entry.id, 'start_date', e.target.value)} />
                         </div>
                       </div>
-                      <div className="col-md-3">
+                      <div className="col-md-6">
                         <div className="form-group">
-                          <label>Duration To</label>
-                          <input type="date" className="input-field form-control"
+                          <label>Duration To (Month &amp; Year)</label>
+                          <input type="month" className="input-field form-control"
                             value={entry.end_date || ''}
                             onChange={e => handleEduChange(entry.id, 'end_date', e.target.value)} />
                         </div>
                       </div>
-                      <div className="col-md-3">
-                        <div className="form-group">
-                          <label>Grades / Result</label>
-                          <input type="text" className="input-field form-control"
-                            value={entry.result || ''}
-                            onChange={e => handleEduChange(entry.id, 'result', e.target.value)}
-                            placeholder="e.g. A, 85%" />
-                        </div>
-                      </div>
-                      <div className="col-md-3">
-                        <div className="form-group">
-                          <label>CGPA</label>
-                          <input type="text" className="input-field form-control"
-                            value={entry.cgpa || ''}
-                            onChange={e => handleEduChange(entry.id, 'cgpa', e.target.value)}
-                            placeholder="e.g. 3.8 / 4.0" />
-                        </div>
-                      </div>
-                      <div className="col-md-12">
+                      <div className="col-md-6">
                         <div className="form-group">
                           <label>Subjects</label>
                           <input type="text" className="input-field form-control"
                             value={entry.subjects || ''}
                             onChange={e => handleEduChange(entry.id, 'subjects', e.target.value)}
                             placeholder="e.g. Math, Physics, Chemistry" />
+                        </div>
+                      </div>
+                      <div className="col-md-6">
+                        <div className="form-group">
+                          <label>Grade / CGPA</label>
+                          <input type="text" className="input-field form-control"
+                            value={entry.grade_cgpa || ''}
+                            onChange={e => handleEduChange(entry.id, 'grade_cgpa', e.target.value)}
+                            placeholder="e.g. A, 85%, 3.8 / 4.0" />
                         </div>
                       </div>
                     </div>
@@ -1362,23 +1450,23 @@ export default function CreateStudent() {
                             onChange={e => handleWorkChange(exp.id, 'designation', e.target.value)} />
                         </div>
                       </div>
-                      <div className="col-md-3">
+                      <div className="col-md-6">
                         <div className="form-group">
-                          <label>Duration From</label>
-                          <input type="date" className="input-field form-control"
+                          <label>Duration From (Month &amp; Year)</label>
+                          <input type="month" className="input-field form-control"
                             value={exp.date_from || ''}
                             onChange={e => handleWorkChange(exp.id, 'date_from', e.target.value)} />
                         </div>
                       </div>
-                      <div className="col-md-3">
+                      <div className="col-md-6">
                         <div className="form-group">
-                          <label>Duration To</label>
-                          <input type="date" className="input-field form-control"
+                          <label>Duration To (Month &amp; Year)</label>
+                          <input type="month" className="input-field form-control"
                             value={exp.date_to || ''}
                             onChange={e => handleWorkChange(exp.id, 'date_to', e.target.value)} />
                         </div>
                       </div>
-                      <div className="col-md-3">
+                      <div className="col-md-6">
                         <div className="form-group">
                           <label>Full or Part Time</label>
                           <select className="input-field form-control"
@@ -1388,15 +1476,6 @@ export default function CreateStudent() {
                             <option value="Full Time">Full Time</option>
                             <option value="Part Time">Part Time</option>
                           </select>
-                        </div>
-                      </div>
-                      <div className="col-md-3">
-                        <div className="form-group">
-                          <label>Duration (summary)</label>
-                          <input type="text" className="input-field form-control"
-                            value={exp.duration || ''}
-                            onChange={e => handleWorkChange(exp.id, 'duration', e.target.value)}
-                            placeholder="e.g. 2 years" />
                         </div>
                       </div>
                     </div>
@@ -1409,6 +1488,113 @@ export default function CreateStudent() {
                 <button type="button" className="btn-primary btn-sm" onClick={addWork}>
                   <FontAwesomeIcon icon={faPlus} /> Add Experience
                 </button>
+              </div>
+            </div>
+
+            {/* SECTION: INTENDED PROGRAM OF STUDY */}
+            <div style={sectionStyle}>
+              <h2 style={{ ...sectionTitleStyle, marginBottom: '20px' }}>
+                Intended Program of Study
+              </h2>
+
+              {intendedPrograms.length > 0 ? (
+                intendedPrograms.map((entry, index) => {
+                  const unis = universitiesByCountry[String(entry.country_id)] || [];
+                  return (
+                    <div key={entry.id} className="dynamic-entry">
+                      <div className="entry-header">
+                        <h3>Program #{index + 1}</h3>
+                        <button type="button" className="btn-icon btn-delete" onClick={() => removeIntendedProgram(entry.id)}>
+                          <FontAwesomeIcon icon={faTrash} />
+                        </button>
+                      </div>
+                      <div className="row">
+                        <div className="col-md-6">
+                          <div className="form-group">
+                            <label>Country</label>
+                            <select className="input-field form-control"
+                              value={entry.country_id}
+                              onChange={e => handleIntendedProgramChange(entry.id, 'country_id', e.target.value)}>
+                              <option value="">{assignedCountryIds.length ? 'Select Country' : 'Assign countries first'}</option>
+                              {allCountries.filter(c => assignedCountryIds.includes(c.id)).map(c => (
+                                <option key={c.id} value={c.id}>{c.country_name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="form-group">
+                            <label>Institution</label>
+                            <select className="input-field form-control"
+                              value={entry.university_id}
+                              onChange={e => handleIntendedProgramChange(entry.id, 'university_id', e.target.value)}
+                              disabled={!entry.country_id}>
+                              <option value="">{entry.country_id ? 'Select Institution' : 'Select a country first'}</option>
+                              {unis.map(u => (
+                                <option key={u.id} value={u.id}>{u.university_name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="form-group">
+                            <label>Program(s)</label>
+                            <input type="text" className="input-field form-control"
+                              value={entry.program_name || ''}
+                              onChange={e => handleIntendedProgramChange(entry.id, 'program_name', e.target.value)}
+                              placeholder="e.g. Computer Science" />
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="form-group">
+                            <label>Full / Part Time</label>
+                            <select className="input-field form-control"
+                              value={entry.study_mode || ''}
+                              onChange={e => handleIntendedProgramChange(entry.id, 'study_mode', e.target.value)}>
+                              <option value="">Select</option>
+                              <option value="Full Time">Full Time</option>
+                              <option value="Part Time">Part Time</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="no-data-message"><p>No intended programs added yet. Click "Add Program" to begin.</p></div>
+              )}
+              <div style={{ marginTop: '12px', marginBottom: '20px' }}>
+                <button type="button" className="btn-primary btn-sm" onClick={addIntendedProgram}>
+                  <FontAwesomeIcon icon={faPlus} /> Add Program
+                </button>
+              </div>
+
+              <div className="row">
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Intake – Session</label>
+                    <select name="intake_session" className="input-field form-control"
+                      value={studentData.intake_session || ''} onChange={handleInputChange}>
+                      <option value="">Select Session</option>
+                      {INTAKE_SESSION_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <div className="form-group">
+                    <label>Intake Year</label>
+                    <select name="intake_year" className="input-field form-control"
+                      value={studentData.intake_year || ''} onChange={handleInputChange}>
+                      <option value="">Select Year</option>
+                      {INTAKE_YEAR_OPTIONS.map(year => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
 

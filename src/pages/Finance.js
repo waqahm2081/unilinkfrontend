@@ -896,12 +896,12 @@ export default function Finance() {
 
           <div className="leads-header">
             <div className="header-left">
-              <h1><FontAwesomeIcon icon={faWallet} className="page-icon" />Finance & Invoices</h1>
+              <h1><FontAwesomeIcon icon={faWallet} className="page-icon" />Manage Invoices</h1>
             </div>
             <div className="header-right" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <PrintReportButton
                 show={hasActiveFilters}
-                title="Finance & Invoices"
+                title="Manage Invoices"
                 columns={printColumns}
                 rows={filteredInvoices}
               />

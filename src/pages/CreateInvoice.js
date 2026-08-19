@@ -818,7 +818,7 @@ export default function CreateInvoice() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (data.success) navigate('/finance');
+      if (data.success) navigate('/finance/invoices');
       else setError(data.message || 'Failed to create invoice');
     } catch { setError('Network error. Please try again.'); }
     finally { setSubmitting(false); }
@@ -842,7 +842,7 @@ export default function CreateInvoice() {
         <div className="leads-container">
           <div className="leads-header">
             <div className="header-left">
-              <button className="btn-secondary" onClick={() => navigate('/finance')}
+              <button className="btn-secondary" onClick={() => navigate('/finance/invoices')}
                 style={{ marginRight: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                 <FontAwesomeIcon icon={faArrowLeft} /> Back
               </button>
@@ -1692,7 +1692,7 @@ export default function CreateInvoice() {
                   >
                     <FontAwesomeIcon icon={faEye} /> Preview Invoice
                   </button>
-                  <button className="btn-secondary" onClick={() => navigate('/finance')} style={{ width: '100%', justifyContent: 'center' }}>
+                  <button className="btn-secondary" onClick={() => navigate('/finance/invoices')} style={{ width: '100%', justifyContent: 'center' }}>
                     Cancel
                   </button>
                 </div>
